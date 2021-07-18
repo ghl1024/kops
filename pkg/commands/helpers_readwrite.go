@@ -40,7 +40,7 @@ func UpdateCluster(ctx context.Context, clientset simple.Clientset, cluster *kop
 		return fmt.Errorf("error populating configuration: %v", err)
 	}
 
-	assetBuilder := assets.NewAssetBuilder(cluster, "")
+	assetBuilder := assets.NewAssetBuilder(cluster, false)
 	fullCluster, err := cloudup.PopulateClusterSpec(clientset, cluster, cloud, assetBuilder)
 	if err != nil {
 		return err
@@ -52,8 +52,7 @@ func UpdateCluster(ctx context.Context, clientset simple.Clientset, cluster *kop
 	}
 
 	// Retrieve the current status of the cluster.  This will eventually be part of the cluster object.
-	statusDiscovery := &CloudDiscoveryStatusStore{}
-	status, err := statusDiscovery.FindClusterStatus(cluster)
+	status, err := cloud.FindClusterStatus(cluster)
 	if err != nil {
 		return err
 	}
@@ -79,7 +78,7 @@ func UpdateInstanceGroup(ctx context.Context, clientset simple.Clientset, cluste
 		return fmt.Errorf("error populating configuration: %v", err)
 	}
 
-	assetBuilder := assets.NewAssetBuilder(cluster, "")
+	assetBuilder := assets.NewAssetBuilder(cluster, false)
 	fullCluster, err := cloudup.PopulateClusterSpec(clientset, cluster, cloud, assetBuilder)
 	if err != nil {
 		return err

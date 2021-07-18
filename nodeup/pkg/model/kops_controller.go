@@ -23,6 +23,7 @@ import (
 	"k8s.io/kops/pkg/wellknownusers"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
+	"sigs.k8s.io/yaml"
 )
 
 // KopsControllerBuilder installs the keys for a kops-controller.
@@ -56,6 +57,7 @@ func (b *KopsControllerBuilder) Build(c *fi.ModelBuilderContext) error {
 	issueCert := &nodetasks.IssueCert{
 		Name:           "kops-controller",
 		Signer:         fi.CertificateIDCA,
+		KeypairID:      b.NodeupConfig.KeypairIDs[fi.CertificateIDCA],
 		Type:           "server",
 		Subject:        nodetasks.PKIXName{CommonName: "kops-controller"},
 		AlternateNames: []string{"kops-controller.internal." + b.Cluster.ObjectMeta.Name},
@@ -84,11 +86,23 @@ func (b *KopsControllerBuilder) Build(c *fi.ModelBuilderContext) error {
 	}
 	for _, cert := range caList {
 		owner := wellknownusers.KopsControllerName
-		err := b.BuildCertificatePairTask(c, cert, pkiDir, cert, &owner)
+		err := b.BuildCertificatePairTask(c, cert, pkiDir, cert, &owner, nil)
 		if err != nil {
 			return err
 		}
 	}
+
+	keypairIDs, err := yaml.Marshal(b.NodeupConfig.KeypairIDs)
+	if err != nil {
+		return err
+	}
+	c.AddTask(&nodetasks.File{
+		Path:     filepath.Join(pkiDir, "keypair-ids.yaml"),
+		Contents: fi.NewBytesResource(keypairIDs),
+		Type:     nodetasks.FileType_File,
+		Mode:     s("0600"),
+		Owner:    s(wellknownusers.KopsControllerName),
+	})
 
 	return nil
 }

@@ -17,13 +17,14 @@ limitations under the License.
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	"k8s.io/kops/pkg/apis/kops"
-	"k8s.io/kops/pkg/featureflag"
-	"k8s.io/kops/pkg/model/iam"
+	"k8s.io/kops/pkg/dns"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/loader"
+	"k8s.io/kops/util/pkg/vfs"
 )
 
 // DiscoveryOptionsBuilder adds options for identity discovery to the model (mostly kube-apiserver)
@@ -36,13 +37,19 @@ var _ loader.OptionsBuilder = &DiscoveryOptionsBuilder{}
 func (b *DiscoveryOptionsBuilder) BuildOptions(o interface{}) error {
 	clusterSpec := o.(*kops.ClusterSpec)
 
-	useJWKS := featureflag.PublicJWKS.Enabled()
-	if !useJWKS && b.IsKubernetesLT("1.20") {
-		return nil
-	}
-
 	if clusterSpec.KubeAPIServer == nil {
 		clusterSpec.KubeAPIServer = &kops.KubeAPIServerConfig{}
+	}
+
+	if b.IsKubernetesLT("1.20") {
+		// TODO when dropping support for 1.19, remove the logic in nodeup's KubeAPIServerBuilder
+		// and apply_cluster for handling an empty ServiceAccountIssuer.
+		if clusterSpec.KubeAPIServer.FeatureGates == nil {
+			return nil
+		}
+		if _, ok := clusterSpec.KubeAPIServer.FeatureGates["ServiceAccountIssuerDiscovery"]; !ok {
+			return nil
+		}
 	}
 
 	kubeAPIServer := clusterSpec.KubeAPIServer
@@ -51,33 +58,55 @@ func (b *DiscoveryOptionsBuilder) BuildOptions(o interface{}) error {
 		kubeAPIServer.APIAudiences = []string{"kubernetes.svc.default"}
 	}
 
-	serviceAccountIssuer, err := iam.ServiceAccountIssuer(clusterSpec)
-	if err != nil {
-		return err
+	if kubeAPIServer.ServiceAccountIssuer == nil {
+		said := clusterSpec.ServiceAccountIssuerDiscovery
+		var serviceAccountIssuer string
+		if said != nil && said.DiscoveryStore != "" {
+			store := said.DiscoveryStore
+			base, err := vfs.Context.BuildVfsPath(store)
+			if err != nil {
+				return fmt.Errorf("error parsing locationStore=%q: %w", store, err)
+			}
+			switch base := base.(type) {
+			case *vfs.S3Path:
+				serviceAccountIssuer, err = base.GetHTTPsUrl()
+				if err != nil {
+					return err
+				}
+			case *vfs.MemFSPath:
+				if !base.IsClusterReadable() {
+					// If this _is_ a test, we should call MarkClusterReadable
+					return fmt.Errorf("locationStore=%q is only supported in tests", store)
+				}
+				serviceAccountIssuer = strings.Replace(base.Path(), "memfs://", "https://", 1)
+			default:
+				return fmt.Errorf("locationStore=%q is of unexpected type %T", store, base)
+			}
+		} else {
+			if dns.IsGossipHostname(clusterSpec.MasterInternalName) {
+				serviceAccountIssuer = "https://kubernetes.default"
+			} else if supportsPublicJWKS(clusterSpec) {
+				serviceAccountIssuer = "https://" + clusterSpec.MasterPublicName
+			} else {
+				serviceAccountIssuer = "https://" + clusterSpec.MasterInternalName
+			}
+		}
+		kubeAPIServer.ServiceAccountIssuer = &serviceAccountIssuer
 	}
-	kubeAPIServer.ServiceAccountIssuer = &serviceAccountIssuer
-
+	kubeAPIServer.ServiceAccountJWKSURI = fi.String(*kubeAPIServer.ServiceAccountIssuer + "/openid/v1/jwks")
 	// We set apiserver ServiceAccountKey and ServiceAccountSigningKeyFile in nodeup
 
-	if useJWKS {
-		if kubeAPIServer.FeatureGates == nil {
-			kubeAPIServer.FeatureGates = make(map[string]string)
-		}
-		kubeAPIServer.FeatureGates["ServiceAccountIssuerDiscovery"] = "true"
-
-		if kubeAPIServer.ServiceAccountJWKSURI == nil {
-			jwksURL := *kubeAPIServer.ServiceAccountIssuer
-			jwksURL = strings.TrimSuffix(jwksURL, "/") + "/keys.json"
-
-			kubeAPIServer.ServiceAccountJWKSURI = &jwksURL
-		}
-	} else if kubeAPIServer.ServiceAccountJWKSURI == nil {
-		jwksURI, err := iam.ServiceAccountIssuer(clusterSpec)
-		if err != nil {
-			return err
-		}
-		kubeAPIServer.ServiceAccountJWKSURI = fi.String(jwksURI + "/openid/v1/jwks")
-	}
-
 	return nil
+}
+
+func supportsPublicJWKS(clusterSpec *kops.ClusterSpec) bool {
+	if !fi.BoolValue(clusterSpec.KubeAPIServer.AnonymousAuth) {
+		return false
+	}
+	for _, cidr := range clusterSpec.KubernetesAPIAccess {
+		if cidr == "0.0.0.0/0" || cidr == "::/0" {
+			return true
+		}
+	}
+	return false
 }

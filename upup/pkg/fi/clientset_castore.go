@@ -17,7 +17,6 @@ limitations under the License.
 package fi
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -65,30 +64,20 @@ func NewClientsetSSHCredentialStore(cluster *kops.Cluster, clientset kopsinterna
 	return c
 }
 
-// keyset is a parsed Keyset
-type keyset struct {
-	legacyFormat bool
-	items        map[string]*keysetItem
-	primary      *keysetItem
-}
-
-// keysetItem is a parsed KeysetItem
-type keysetItem struct {
-	id          string
-	certificate *pki.Certificate
-	privateKey  *pki.PrivateKey
-}
-
-func parseKeyset(o *kops.Keyset) (*keyset, error) {
+func parseKeyset(o *kops.Keyset) (*Keyset, error) {
 	name := o.Name
 
-	keyset := &keyset{
-		items: make(map[string]*keysetItem),
+	keyset := &Keyset{
+		Items: make(map[string]*KeysetItem),
 	}
 
 	for _, key := range o.Spec.Keys {
-		ki := &keysetItem{
-			id: key.Id,
+		ki := &KeysetItem{
+			Id: key.Id,
+		}
+		if key.DistrustTimestamp != nil {
+			distrustTimestamp := key.DistrustTimestamp.Time
+			ki.DistrustTimestamp = &distrustTimestamp
 		}
 		if len(key.PublicMaterial) != 0 {
 			cert, err := pki.ParsePEMCertificate(key.PublicMaterial)
@@ -96,7 +85,7 @@ func parseKeyset(o *kops.Keyset) (*keyset, error) {
 				klog.Warningf("key public material was %s", key.PublicMaterial)
 				return nil, fmt.Errorf("error loading certificate %s/%s: %v", name, key.Id, err)
 			}
-			ki.certificate = cert
+			ki.Certificate = cert
 		}
 
 		if len(key.PrivateMaterial) != 0 {
@@ -104,19 +93,19 @@ func parseKeyset(o *kops.Keyset) (*keyset, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error loading private key %s/%s: %v", name, key.Id, err)
 			}
-			ki.privateKey = privateKey
+			ki.PrivateKey = privateKey
 		}
 
-		keyset.items[key.Id] = ki
+		keyset.Items[key.Id] = ki
 	}
 
-	keyset.primary = keyset.findPrimary()
+	keyset.Primary = keyset.Items[FindPrimary(o).Id]
 
 	return keyset, nil
 }
 
-// loadKeyset gets the named keyset and the format of the Keyset.
-func (c *ClientsetCAStore) loadKeyset(ctx context.Context, name string) (*keyset, error) {
+// loadKeyset gets the named Keyset and the format of the Keyset.
+func (c *ClientsetCAStore) loadKeyset(ctx context.Context, name string) (*Keyset, error) {
 	o, err := c.clientset.Keysets(c.namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -132,38 +121,29 @@ func (c *ClientsetCAStore) loadKeyset(ctx context.Context, name string) (*keyset
 	return keyset, nil
 }
 
-// findPrimary returns the primary keysetItem in the keyset
-func (k *keyset) findPrimary() *keysetItem {
-	var primary *keysetItem
-	var primaryVersion *big.Int
-
-	for _, item := range k.items {
-		version, ok := big.NewInt(0).SetString(item.id, 10)
-		if !ok {
-			klog.Warningf("Ignoring key item with non-integer version: %q", item.id)
-			continue
-		}
-
-		if primaryVersion == nil || version.Cmp(primaryVersion) > 0 {
-			primary = item
-			primaryVersion = version
-		}
-	}
-	return primary
-}
-
 // FindPrimary returns the primary KeysetItem in the Keyset
 func FindPrimary(keyset *kops.Keyset) *kops.KeysetItem {
 	var primary *kops.KeysetItem
 	var primaryVersion *big.Int
+
+	primaryId := keyset.Spec.PrimaryId
+
 	for i := range keyset.Spec.Keys {
 		item := &keyset.Spec.Keys[i]
+		if item.DistrustTimestamp != nil {
+			continue
+		}
+
 		version, ok := big.NewInt(0).SetString(item.Id, 10)
 		if !ok {
 			klog.Warningf("Ignoring key item with non-integer version: %q", item.Id)
 			continue
 		}
 
+		if item.Id == primaryId {
+			return item
+		}
+
 		if primaryVersion == nil || version.Cmp(primaryVersion) > 0 {
 			primary = item
 			primaryVersion = version
@@ -172,78 +152,21 @@ func FindPrimary(keyset *kops.Keyset) *kops.KeysetItem {
 	return primary
 }
 
-// FindKeypair implements CAStore::FindKeypair
-func (c *ClientsetCAStore) FindKeypair(name string) (*pki.Certificate, *pki.PrivateKey, bool, error) {
-	ctx := context.TODO()
-	keyset, err := c.loadKeyset(ctx, name)
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	if keyset != nil && keyset.primary != nil {
-		return keyset.primary.certificate, keyset.primary.privateKey, keyset.legacyFormat, nil
-	}
-
-	return nil, nil, false, nil
+// FindPrimaryKeypair implements PKI::FindPrimaryKeypair
+func (c *ClientsetCAStore) FindPrimaryKeypair(name string) (*pki.Certificate, *pki.PrivateKey, error) {
+	return FindPrimaryKeypair(c, name)
 }
 
-// FindCert implements CAStore::FindCert
-func (c *ClientsetCAStore) FindCert(name string) (*pki.Certificate, error) {
+// FindKeyset implements CAStore::FindKeyset
+func (c *ClientsetCAStore) FindKeyset(name string) (*Keyset, error) {
 	ctx := context.TODO()
-	keyset, err := c.loadKeyset(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-
-	if keyset != nil && keyset.primary != nil {
-		return keyset.primary.certificate, nil
-	}
-
-	return nil, nil
-}
-
-// FindCertificatePool implements CAStore::FindCertificatePool
-func (c *ClientsetCAStore) FindCertificatePool(name string) (*CertificatePool, error) {
-	ctx := context.TODO()
-	keyset, err := c.loadKeyset(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-
-	pool := &CertificatePool{}
-
-	if keyset != nil {
-		if keyset.primary != nil {
-			pool.Primary = keyset.primary.certificate
-		}
-
-		for id, item := range keyset.items {
-			if id == keyset.primary.id {
-				continue
-			}
-			pool.Secondary = append(pool.Secondary, item.certificate)
-		}
-	}
-	return pool, nil
-}
-
-// FindCertificateKeyset implements CAStore::FindCertificateKeyset
-func (c *ClientsetCAStore) FindCertificateKeyset(name string) (*kops.Keyset, error) {
-	ctx := context.TODO()
-	o, err := c.clientset.Keysets(c.namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error reading keyset %q: %v", name, err)
-	}
-	return o, nil
+	return c.loadKeyset(ctx, name)
 }
 
 // ListKeysets implements CAStore::ListKeysets
-func (c *ClientsetCAStore) ListKeysets() ([]*kops.Keyset, error) {
+func (c *ClientsetCAStore) ListKeysets() (map[string]*Keyset, error) {
 	ctx := context.TODO()
-	var items []*kops.Keyset
+	items := map[string]*Keyset{}
 
 	{
 		list, err := c.clientset.Keysets(c.namespace).List(ctx, metav1.ListOptions{})
@@ -255,7 +178,12 @@ func (c *ClientsetCAStore) ListKeysets() ([]*kops.Keyset, error) {
 			keyset := &list.Items[i]
 			switch keyset.Spec.Type {
 			case kops.SecretTypeKeypair:
-				items = append(items, &list.Items[i])
+				item, err := parseKeyset(keyset)
+				if err != nil {
+					return nil, fmt.Errorf("parsing keyset %q: %w", keyset.Name, err)
+				}
+
+				items[keyset.Name] = item
 
 			case kops.SecretTypeSecret:
 				continue // Ignore - this is handled by ClientsetSecretStore
@@ -288,122 +216,44 @@ func (c *ClientsetCAStore) ListSSHCredentials() ([]*kops.SSHCredential, error) {
 	return items, nil
 }
 
-// StoreKeypair implements CAStore::StoreKeypair
-func (c *ClientsetCAStore) StoreKeypair(name string, cert *pki.Certificate, privateKey *pki.PrivateKey) error {
+// StoreKeyset implements CAStore::StoreKeyset
+func (c *ClientsetCAStore) StoreKeyset(name string, keyset *Keyset) error {
 	ctx := context.TODO()
-	return c.storeKeypair(ctx, name, cert.Certificate.SerialNumber.String(), cert, privateKey)
+	return c.storeKeyset(ctx, name, keyset)
 }
 
-// AddCert implements CAStore::AddCert
-func (c *ClientsetCAStore) AddCert(name string, cert *pki.Certificate) error {
-	ctx := context.TODO()
-	klog.Infof("Adding TLS certificate: %q", name)
+// storeKeyset saves the specified keyset to the registry.
+func (c *ClientsetCAStore) storeKeyset(ctx context.Context, name string, keyset *Keyset) error {
+	create := false
+	client := c.clientset.Keysets(c.namespace)
 
-	// We add with a timestamp of zero so this will never be the newest cert
-	serial := pki.BuildPKISerial(0)
-
-	err := c.storeKeypair(ctx, name, serial.String(), cert, nil)
+	kopsKeyset, err := keyset.ToAPIObject(name)
 	if err != nil {
 		return err
 	}
 
-	return nil
-}
-
-// FindPrivateKey implements CAStore::FindPrivateKey
-func (c *ClientsetCAStore) FindPrivateKey(name string) (*pki.PrivateKey, error) {
-	ctx := context.TODO()
-	keyset, err := c.loadKeyset(ctx, name)
-	if err != nil {
-		return nil, err
+	oldKeyset, err := client.Get(ctx, name, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		oldKeyset = nil
+		err = nil
 	}
-
-	if keyset != nil && keyset.primary != nil {
-		return keyset.primary.privateKey, nil
-	}
-	return nil, nil
-}
-
-// FindPrivateKeyset implements CAStore::FindPrivateKeyset
-func (c *ClientsetCAStore) FindPrivateKeyset(name string) (*kops.Keyset, error) {
-	ctx := context.TODO()
-	o, err := c.clientset.Keysets(c.namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error reading keyset %q: %v", name, err)
-	}
-	return o, nil
-}
-
-// addKey saves the specified key to the registry
-func (c *ClientsetCAStore) addKey(ctx context.Context, name string, keysetType kops.KeysetType, item *kops.KeysetItem) error {
-	create := false
-	client := c.clientset.Keysets(c.namespace)
-	keyset, err := client.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			keyset = nil
+	if err == nil {
+		if oldKeyset == nil {
+			create = true
 		} else {
-			return fmt.Errorf("error reading keyset %q: %v", name, err)
+			kopsKeyset.ObjectMeta = oldKeyset.ObjectMeta
 		}
+	} else {
+		return fmt.Errorf("error reading keyset %q: %v", name, err)
 	}
-	if keyset == nil {
-		keyset = &kops.Keyset{}
-		keyset.Name = name
-		keyset.Spec.Type = keysetType
-		create = true
-	}
-	keyset.Spec.Keys = append(keyset.Spec.Keys, *item)
+
 	if create {
-		if _, err := client.Create(ctx, keyset, metav1.CreateOptions{}); err != nil {
+		if _, err := client.Create(ctx, kopsKeyset, metav1.CreateOptions{}); err != nil {
 			return fmt.Errorf("error creating keyset %q: %v", name, err)
 		}
 	} else {
-		if _, err := client.Update(ctx, keyset, metav1.UpdateOptions{}); err != nil {
+		if _, err := client.Update(ctx, kopsKeyset, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("error updating keyset %q: %v", name, err)
-		}
-	}
-	return nil
-}
-
-// deleteKeysetItem deletes the specified key from the registry; deleting the whole keyset if it was the last one
-func deleteKeysetItem(client kopsinternalversion.KeysetInterface, name string, keysetType kops.KeysetType, id string) error {
-	ctx := context.TODO()
-
-	keyset, err := client.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("error reading Keyset %q: %v", name, err)
-	}
-
-	if keyset.Spec.Type != keysetType {
-		return fmt.Errorf("mismatch on Keyset type on %q", name)
-	}
-
-	var newKeys []kops.KeysetItem
-	found := false
-	for _, ki := range keyset.Spec.Keys {
-		if ki.Id == id {
-			found = true
-		} else {
-			newKeys = append(newKeys, ki)
-		}
-	}
-	if !found {
-		return fmt.Errorf("KeysetItem %q not found in Keyset %q", id, name)
-	}
-	if len(newKeys) == 0 {
-		if err := client.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
-			return fmt.Errorf("error deleting Keyset %q: %v", name, err)
-		}
-	} else {
-		keyset.Spec.Keys = newKeys
-		if _, err := client.Update(ctx, keyset, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("error updating Keyset %q: %v", name, err)
 		}
 	}
 	return nil
@@ -449,26 +299,6 @@ func (c *ClientsetCAStore) deleteSSHCredential(ctx context.Context, name string)
 	return nil
 }
 
-// addKey saves the specified keypair to the registry
-func (c *ClientsetCAStore) storeKeypair(ctx context.Context, name string, id string, cert *pki.Certificate, privateKey *pki.PrivateKey) error {
-	var publicMaterial bytes.Buffer
-	if _, err := cert.WriteTo(&publicMaterial); err != nil {
-		return err
-	}
-
-	var privateMaterial bytes.Buffer
-	if _, err := privateKey.WriteTo(&privateMaterial); err != nil {
-		return err
-	}
-
-	item := &kops.KeysetItem{
-		Id:              id,
-		PublicMaterial:  publicMaterial.Bytes(),
-		PrivateMaterial: privateMaterial.Bytes(),
-	}
-	return c.addKey(ctx, name, kops.SecretTypeKeypair, item)
-}
-
 // AddSSHPublicKey implements CAStore::AddSSHPublicKey
 func (c *ClientsetCAStore) AddSSHPublicKey(name string, pubkey []byte) error {
 	ctx := context.TODO()
@@ -506,18 +336,6 @@ func (c *ClientsetCAStore) FindSSHPublicKeys(name string) ([]*kops.SSHCredential
 	return items, nil
 }
 
-// DeleteKeysetItem implements CAStore::DeleteKeysetItem
-func (c *ClientsetCAStore) DeleteKeysetItem(item *kops.Keyset, id string) error {
-	switch item.Spec.Type {
-	case kops.SecretTypeKeypair:
-		client := c.clientset.Keysets(c.namespace)
-		return deleteKeysetItem(client, item.Name, kops.SecretTypeKeypair, id)
-	default:
-		// Primarily because we need to make sure users can recreate them!
-		return fmt.Errorf("deletion of keystore items of type %v not (yet) supported", item.Spec.Type)
-	}
-}
-
 // DeleteSSHCredential implements SSHCredentialStore::DeleteSSHCredential
 func (c *ClientsetCAStore) DeleteSSHCredential(item *kops.SSHCredential) error {
 	ctx := context.TODO()
@@ -531,8 +349,8 @@ func (c *ClientsetCAStore) MirrorTo(basedir vfs.Path) error {
 		return err
 	}
 
-	for _, keyset := range keysets {
-		if err := mirrorKeyset(c.cluster, basedir, keyset); err != nil {
+	for name, keyset := range keysets {
+		if err := mirrorKeyset(c.cluster, basedir, name, keyset); err != nil {
 			return err
 		}
 	}

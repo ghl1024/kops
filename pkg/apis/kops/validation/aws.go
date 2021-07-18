@@ -41,20 +41,25 @@ func awsValidateCluster(c *kops.Cluster) field.ErrorList {
 		}
 	}
 
-	allErrs = append(allErrs, awsValidateExternalCloudControllerManager(c.Spec)...)
+	allErrs = append(allErrs, awsValidateExternalCloudControllerManager(c)...)
 
 	return allErrs
 }
 
-func awsValidateExternalCloudControllerManager(c kops.ClusterSpec) (allErrs field.ErrorList) {
+func awsValidateExternalCloudControllerManager(cluster *kops.Cluster) (allErrs field.ErrorList) {
+	c := cluster.Spec
 
-	if c.ExternalCloudControllerManager != nil {
-		if c.KubeControllerManager == nil || c.KubeControllerManager.ExternalCloudVolumePlugin != "aws" {
-			if c.CloudConfig == nil || c.CloudConfig.AWSEBSCSIDriver == nil || !fi.BoolValue(c.CloudConfig.AWSEBSCSIDriver.Enabled) {
-				allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "externalCloudControllerManager"),
-					"AWS external CCM cannot be used without enabling spec.cloudConfig.AWSEBSCSIDriver or setting spec.kubeControllerManaager.externalCloudVolumePlugin set to `aws`"))
-			}
-		}
+	if c.ExternalCloudControllerManager == nil {
+		return allErrs
+	}
+	fldPath := field.NewPath("spec", "externalCloudControllerManager")
+	if !cluster.IsKubernetesGTE("1.18") {
+		allErrs = append(allErrs, field.Forbidden(fldPath, "AWS external CCM requires kubernetes 1.18+"))
+	}
+
+	if !hasAWSEBSCSIDriver(c) {
+		allErrs = append(allErrs, field.Forbidden(fldPath,
+			"AWS external CCM cannot be used without enabling spec.cloudConfig.AWSEBSCSIDriver."))
 	}
 	return allErrs
 
@@ -125,26 +130,30 @@ func awsValidateAdditionalSecurityGroups(fieldPath *field.Path, groups []string)
 	return allErrs
 }
 
-func awsValidateInstanceTypeAndImage(instanceTypeFieldPath *field.Path, imageFieldPath *field.Path, instanceType string, image string, cloud awsup.AWSCloud) field.ErrorList {
+func awsValidateInstanceTypeAndImage(instanceTypeFieldPath *field.Path, imageFieldPath *field.Path, instanceTypes string, image string, cloud awsup.AWSCloud) field.ErrorList {
+	if cloud == nil || instanceTypes == "" {
+		return nil
+	}
+
 	allErrs := field.ErrorList{}
 
-	if cloud != nil && instanceType != "" {
-		imageInfo, err := cloud.ResolveImage(image)
-		if err != nil {
-			return append(allErrs, field.Invalid(imageFieldPath, image,
-				fmt.Sprintf("image specified is invalid: %q", image)))
-		}
+	imageInfo, err := cloud.ResolveImage(image)
+	if err != nil {
+		return append(allErrs, field.Invalid(imageFieldPath, image,
+			fmt.Sprintf("image specified is invalid: %q", image)))
+	}
+	imageArch := fi.StringValue(imageInfo.Architecture)
 
-		imageArch := fi.StringValue(imageInfo.Architecture)
-
+	// Spotinst uses the instance type field to keep a "," separated list of instance types
+	for _, instanceType := range strings.Split(instanceTypes, ",") {
 		machineInfo, err := cloud.DescribeInstanceType(instanceType)
 		if err != nil {
-			return append(allErrs, field.Invalid(instanceTypeFieldPath, instanceType,
-				fmt.Sprintf("machine type specified is invalid: %q", instanceType)))
+			allErrs = append(allErrs, field.Invalid(instanceTypeFieldPath, instanceTypes, fmt.Sprintf("machine type specified is invalid: %q", instanceType)))
+			continue
 		}
 
 		found := false
-		if machineInfo.ProcessorInfo != nil {
+		if machineInfo != nil && machineInfo.ProcessorInfo != nil {
 			for _, machineArch := range machineInfo.ProcessorInfo.SupportedArchitectures {
 				if imageArch == fi.StringValue(machineArch) {
 					found = true
@@ -152,8 +161,12 @@ func awsValidateInstanceTypeAndImage(instanceTypeFieldPath *field.Path, imageFie
 			}
 		}
 		if !found {
-			allErrs = append(allErrs, field.Invalid(instanceTypeFieldPath, instanceType,
-				fmt.Sprintf("machine type architecture does not match image architecture: %s - %s", strings.Join(fi.StringSliceValue(machineInfo.ProcessorInfo.SupportedArchitectures), ","), imageArch)))
+			var machineArch []string
+			if machineInfo != nil && machineInfo.ProcessorInfo != nil && machineInfo.ProcessorInfo.SupportedArchitectures != nil {
+				machineArch = fi.StringSliceValue(machineInfo.ProcessorInfo.SupportedArchitectures)
+			}
+			allErrs = append(allErrs, field.Invalid(instanceTypeFieldPath, instanceTypes,
+				fmt.Sprintf("machine type architecture does not match image architecture: %q - %q", strings.Join(machineArch, ","), imageArch)))
 		}
 	}
 
@@ -287,4 +300,13 @@ func awsValidateCPUCredits(fieldPath *field.Path, spec *kops.InstanceGroupSpec, 
 
 	allErrs = append(allErrs, IsValidValue(fieldPath.Child("cpuCredits"), spec.CPUCredits, []string{"standard", "unlimited"})...)
 	return allErrs
+}
+
+func hasAWSEBSCSIDriver(c kops.ClusterSpec) bool {
+	// AWSEBSCSIDriver will have a default value, so if this is all false, it will be populated on next pass
+	if c.CloudConfig == nil || c.CloudConfig.AWSEBSCSIDriver == nil || c.CloudConfig.AWSEBSCSIDriver.Enabled == nil {
+		return true
+	}
+
+	return *c.CloudConfig.AWSEBSCSIDriver.Enabled
 }

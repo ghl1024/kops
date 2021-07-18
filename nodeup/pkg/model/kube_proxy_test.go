@@ -18,7 +18,6 @@ package model
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"k8s.io/kops/pkg/apis/kops"
@@ -63,11 +62,11 @@ func TestKubeProxyBuilder_buildPod(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			"Setup KubeProxy for kubernetes version 1.10",
+			"Setup KubeProxy for kubernetes version 1.20",
 			fields{
 				&NodeupModelContext{
 					Cluster:           cluster,
-					kubernetesVersion: semver.Version{Major: 1, Minor: 10},
+					kubernetesVersion: semver.Version{Major: 1, Minor: 20},
 				},
 			},
 			&v1.Pod{
@@ -146,12 +145,6 @@ func TestKubeProxyBuilder_buildPod(t *testing.T) {
 				t.Errorf("KubeProxyBuilder.buildPod() Resources = %v, want %v", got.Spec.Containers[0].Resources, tt.want.Spec.Containers[0].Resources)
 			}
 
-			// compare pod spec container command should contain --oom-score-adj=-998
-			gotcommand := got.Spec.Containers[0].Command[2]
-			if !strings.Contains(gotcommand, "--oom-score-adj=-998") {
-				t.Errorf("KubeProxyBuilder.buildPod() Command = %v, want %v", got.Spec.Containers[0].Command, tt.want.Spec.Containers[0].Command)
-			}
-
 		})
 	}
 }
@@ -172,14 +165,6 @@ func TestKubeProxyBuilderAMD64(t *testing.T) {
 
 func TestKubeProxyBuilderARM64(t *testing.T) {
 	RunGoldenTest(t, "tests/golden/side-loading", "kube-proxy-arm64", func(nodeupModelContext *NodeupModelContext, target *fi.ModelBuilderContext) error {
-		builder := KubeProxyBuilder{NodeupModelContext: nodeupModelContext}
-		builder.Architecture = architectures.ArchitectureArm64
-		return builder.Build(target)
-	})
-}
-func TestKubeProxyBuilderWarmPool(t *testing.T) {
-	RunGoldenTest(t, "tests/golden/minimal", "warmpool", func(nodeupModelContext *NodeupModelContext, target *fi.ModelBuilderContext) error {
-		nodeupModelContext.ConfigurationMode = "Warming"
 		builder := KubeProxyBuilder{NodeupModelContext: nodeupModelContext}
 		builder.Architecture = architectures.ArchitectureArm64
 		return builder.Build(target)

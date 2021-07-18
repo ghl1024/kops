@@ -68,6 +68,15 @@ func TestRootVolumeOptimizationFlag(t *testing.T) {
 				InstanceGroups:  igs,
 			},
 		},
+		BootstrapScriptBuilder: &model.BootstrapScriptBuilder{
+			Lifecycle: fi.LifecycleSync,
+			Cluster: &kops.Cluster{
+				Spec: kops.ClusterSpec{
+					Networking: &kops.NetworkingSpec{},
+				},
+			},
+		},
+		Cluster: cluster,
 	}
 
 	c := &fi.ModelBuilderContext{
@@ -81,6 +90,16 @@ func TestRootVolumeOptimizationFlag(t *testing.T) {
 		Type:    "ca",
 	}
 	c.AddTask(caTask)
+	for _, keypair := range []string{
+		"etcd-clients-ca",
+	} {
+		task := &fitasks.Keypair{
+			Name:    fi.String(keypair),
+			Subject: "cn=" + keypair,
+			Type:    "ca",
+		}
+		c.AddTask(task)
+	}
 
 	if err := b.Build(c); err != nil {
 		t.Fatalf("error from Build: %v", err)
@@ -153,6 +172,15 @@ func TestAPIServerAdditionalSecurityGroupsWithNLB(t *testing.T) {
 				InstanceGroups:  igs,
 			},
 		},
+		BootstrapScriptBuilder: &model.BootstrapScriptBuilder{
+			KopsModelContext: &model.KopsModelContext{
+				IAMModelContext: iam.IAMModelContext{Cluster: cluster},
+				InstanceGroups:  igs,
+			},
+			Lifecycle: fi.LifecycleSync,
+			Cluster:   cluster,
+		},
+		Cluster: cluster,
 	}
 
 	c := &fi.ModelBuilderContext{
@@ -166,6 +194,22 @@ func TestAPIServerAdditionalSecurityGroupsWithNLB(t *testing.T) {
 		Type:    "ca",
 	}
 	c.AddTask(caTask)
+	for _, keypair := range []string{
+		"apiserver-aggregator-ca",
+		"etcd-clients-ca",
+		"etcd-manager-ca-events",
+		"etcd-manager-ca-main",
+		"etcd-peers-ca-events",
+		"etcd-peers-ca-main",
+		"service-account",
+	} {
+		task := &fitasks.Keypair{
+			Name:    fi.String(keypair),
+			Subject: "cn=" + keypair,
+			Type:    "ca",
+		}
+		c.AddTask(task)
+	}
 
 	b.Build(c)
 

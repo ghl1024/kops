@@ -26,16 +26,18 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type Route struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	RouteTable *RouteTable
 	Instance   *Instance
 	CIDR       *string
+	IPv6CIDR   *string
 
 	// Exactly one of the below fields
 	// MUST be provided.
@@ -47,7 +49,7 @@ type Route struct {
 func (e *Route) Find(c *fi.Context) (*Route, error) {
 	cloud := c.Cloud.(awsup.AWSCloud)
 
-	if e.RouteTable == nil || e.CIDR == nil {
+	if e.RouteTable == nil || (e.CIDR == nil && e.IPv6CIDR == nil) {
 		// TODO: Move to validate?
 		return nil, nil
 	}
@@ -72,13 +74,15 @@ func (e *Route) Find(c *fi.Context) (*Route, error) {
 		}
 		rt := response.RouteTables[0]
 		for _, r := range rt.Routes {
-			if aws.StringValue(r.DestinationCidrBlock) != *e.CIDR {
+			if (r.DestinationCidrBlock == nil || aws.StringValue(r.DestinationCidrBlock) != aws.StringValue(e.CIDR)) &&
+				(r.DestinationIpv6CidrBlock == nil || aws.StringValue(r.DestinationIpv6CidrBlock) != aws.StringValue(e.IPv6CIDR)) {
 				continue
 			}
 			actual := &Route{
 				Name:       e.Name,
 				RouteTable: &RouteTable{ID: rt.RouteTableId},
 				CIDR:       r.DestinationCidrBlock,
+				IPv6CIDR:   r.DestinationIpv6CidrBlock,
 			}
 			if r.GatewayId != nil {
 				actual.InternetGateway = &InternetGateway{ID: r.GatewayId}
@@ -104,7 +108,7 @@ func (e *Route) Find(c *fi.Context) (*Route, error) {
 			// Prevent spurious changes
 			actual.Lifecycle = e.Lifecycle
 
-			klog.V(2).Infof("found route matching cidr %s", *e.CIDR)
+			klog.V(2).Infof("found route matching CIDR=%q IPv6CIDR=%q", aws.StringValue(e.CIDR), aws.StringValue(e.IPv6CIDR))
 			return actual, nil
 		}
 	}
@@ -122,8 +126,11 @@ func (s *Route) CheckChanges(a, e, changes *Route) error {
 		if e.RouteTable == nil {
 			return fi.RequiredField("RouteTable")
 		}
-		if e.CIDR == nil {
-			return fi.RequiredField("CIDR")
+		if e.CIDR == nil && e.IPv6CIDR == nil {
+			return fi.RequiredField("CIDR/IPv6CIDR")
+		}
+		if e.CIDR != nil && e.IPv6CIDR != nil {
+			return fmt.Errorf("cannot set more than 1 CIDR or IPv6CIDR")
 		}
 		targetCount := 0
 		if e.InternetGateway != nil {
@@ -142,7 +149,7 @@ func (s *Route) CheckChanges(a, e, changes *Route) error {
 			return fmt.Errorf("InternetGateway, Instance, NatGateway, or TransitGateway is required")
 		}
 		if targetCount != 1 {
-			return fmt.Errorf("Cannot set more than 1 InternetGateway, Instance, NatGateway, or TransitGateway")
+			return fmt.Errorf("cannot set more than 1 InternetGateway, Instance, NatGateway, or TransitGateway")
 		}
 	}
 
@@ -153,6 +160,9 @@ func (s *Route) CheckChanges(a, e, changes *Route) error {
 		if changes.CIDR != nil {
 			return fi.CannotChangeField("CIDR")
 		}
+		if changes.IPv6CIDR != nil {
+			return fi.CannotChangeField("IPv6CIDR")
+		}
 	}
 	return nil
 }
@@ -161,7 +171,13 @@ func (_ *Route) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Route) error {
 	if a == nil {
 		request := &ec2.CreateRouteInput{}
 		request.RouteTableId = checkNotNil(e.RouteTable.ID)
-		request.DestinationCidrBlock = checkNotNil(e.CIDR)
+
+		if e.CIDR != nil || e.IPv6CIDR != nil {
+			request.DestinationCidrBlock = e.CIDR
+			request.DestinationIpv6CidrBlock = e.IPv6CIDR
+		} else {
+			klog.Fatal("both CIDR and IPv6CIDR were unexpectedly nil")
+		}
 
 		if e.InternetGateway == nil && e.NatGateway == nil && e.TransitGatewayID == nil {
 			return fmt.Errorf("missing target for route")
@@ -177,7 +193,8 @@ func (_ *Route) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Route) error {
 			request.InstanceId = checkNotNil(e.Instance.ID)
 		}
 
-		klog.V(2).Infof("Creating Route with RouteTable:%q CIDR:%q", *e.RouteTable.ID, *e.CIDR)
+		klog.V(2).Infof("Creating Route with RouteTable:%q CIDR:%q IPv6CIDR:%q",
+			aws.StringValue(e.RouteTable.ID), aws.StringValue(e.CIDR), aws.StringValue(e.IPv6CIDR))
 
 		response, err := t.Cloud.EC2().CreateRoute(request)
 		if err != nil {
@@ -196,7 +213,13 @@ func (_ *Route) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Route) error {
 	} else {
 		request := &ec2.ReplaceRouteInput{}
 		request.RouteTableId = checkNotNil(e.RouteTable.ID)
-		request.DestinationCidrBlock = checkNotNil(e.CIDR)
+
+		if e.CIDR != nil || e.IPv6CIDR != nil {
+			request.DestinationCidrBlock = e.CIDR
+			request.DestinationIpv6CidrBlock = e.IPv6CIDR
+		} else {
+			klog.Fatal("both CIDR and IPv6CIDR were unexpectedly nil")
+		}
 
 		if e.InternetGateway == nil && e.NatGateway == nil && e.TransitGatewayID == nil {
 			return fmt.Errorf("missing target for route")
@@ -236,18 +259,20 @@ func checkNotNil(s *string) *string {
 }
 
 type terraformRoute struct {
-	RouteTableID      *terraform.Literal `json:"route_table_id" cty:"route_table_id"`
-	CIDR              *string            `json:"destination_cidr_block,omitempty" cty:"destination_cidr_block"`
-	InternetGatewayID *terraform.Literal `json:"gateway_id,omitempty" cty:"gateway_id"`
-	NATGatewayID      *terraform.Literal `json:"nat_gateway_id,omitempty" cty:"nat_gateway_id"`
-	TransitGatewayID  *string            `json:"transit_gateway_id,omitempty" cty:"transit_gateway_id"`
-	InstanceID        *terraform.Literal `json:"instance_id,omitempty" cty:"instance_id"`
+	RouteTableID      *terraformWriter.Literal `json:"route_table_id" cty:"route_table_id"`
+	CIDR              *string                  `json:"destination_cidr_block,omitempty" cty:"destination_cidr_block"`
+	IPv6CIDR          *string                  `json:"destination_ipv6_cidr_block,omitempty" cty:"destination_ipv6_cidr_block"`
+	InternetGatewayID *terraformWriter.Literal `json:"gateway_id,omitempty" cty:"gateway_id"`
+	NATGatewayID      *terraformWriter.Literal `json:"nat_gateway_id,omitempty" cty:"nat_gateway_id"`
+	TransitGatewayID  *string                  `json:"transit_gateway_id,omitempty" cty:"transit_gateway_id"`
+	InstanceID        *terraformWriter.Literal `json:"instance_id,omitempty" cty:"instance_id"`
 }
 
 func (_ *Route) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *Route) error {
 	tf := &terraformRoute{
-		CIDR:         e.CIDR,
 		RouteTableID: e.RouteTable.TerraformLink(),
+		CIDR:         e.CIDR,
+		IPv6CIDR:     e.IPv6CIDR,
 	}
 
 	if e.InternetGateway == nil && e.NatGateway == nil && e.TransitGatewayID == nil {
@@ -273,6 +298,7 @@ func (_ *Route) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *Rou
 type cloudformationRoute struct {
 	RouteTableID      *cloudformation.Literal `json:"RouteTableId"`
 	CIDR              *string                 `json:"DestinationCidrBlock,omitempty"`
+	IPv6CIDR          *string                 `json:"DestinationIpv6CidrBlock,omitempty"`
 	InternetGatewayID *cloudformation.Literal `json:"GatewayId,omitempty"`
 	NATGatewayID      *cloudformation.Literal `json:"NatGatewayId,omitempty"`
 	TransitGatewayID  *string                 `json:"TransitGatewayId,omitempty"`
@@ -281,8 +307,9 @@ type cloudformationRoute struct {
 
 func (_ *Route) RenderCloudformation(t *cloudformation.CloudformationTarget, a, e, changes *Route) error {
 	tf := &cloudformationRoute{
-		CIDR:         e.CIDR,
 		RouteTableID: e.RouteTable.CloudformationLink(),
+		CIDR:         e.CIDR,
+		IPv6CIDR:     e.IPv6CIDR,
 	}
 
 	if e.InternetGateway == nil && e.NatGateway == nil && e.TransitGatewayID == nil {

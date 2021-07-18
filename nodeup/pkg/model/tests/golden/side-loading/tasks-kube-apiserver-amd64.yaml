@@ -23,28 +23,28 @@ contents: |
       - --cloud-config=/etc/kubernetes/cloud.config
       - --cloud-provider=aws
       - --enable-admission-plugins=NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,NodeRestriction,ResourceQuota
-      - --etcd-cafile=/etc/kubernetes/pki/kube-apiserver/etcd-ca.crt
-      - --etcd-certfile=/etc/kubernetes/pki/kube-apiserver/etcd-client.crt
-      - --etcd-keyfile=/etc/kubernetes/pki/kube-apiserver/etcd-client.key
+      - --etcd-cafile=/srv/kubernetes/kube-apiserver/etcd-ca.crt
+      - --etcd-certfile=/srv/kubernetes/kube-apiserver/etcd-client.crt
+      - --etcd-keyfile=/srv/kubernetes/kube-apiserver/etcd-client.key
       - --etcd-servers-overrides=/events#https://127.0.0.1:4002
       - --etcd-servers=https://127.0.0.1:4001
       - --insecure-port=0
-      - --kubelet-client-certificate=/srv/kubernetes/kubelet-api.crt
-      - --kubelet-client-key=/srv/kubernetes/kubelet-api.key
+      - --kubelet-client-certificate=/srv/kubernetes/kube-apiserver/kubelet-api.crt
+      - --kubelet-client-key=/srv/kubernetes/kube-apiserver/kubelet-api.key
       - --kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP
-      - --proxy-client-cert-file=/srv/kubernetes/apiserver-aggregator.crt
-      - --proxy-client-key-file=/srv/kubernetes/apiserver-aggregator.key
+      - --proxy-client-cert-file=/srv/kubernetes/kube-apiserver/apiserver-aggregator.crt
+      - --proxy-client-key-file=/srv/kubernetes/kube-apiserver/apiserver-aggregator.key
       - --requestheader-allowed-names=aggregator
-      - --requestheader-client-ca-file=/srv/kubernetes/apiserver-aggregator-ca.crt
+      - --requestheader-client-ca-file=/srv/kubernetes/kube-apiserver/apiserver-aggregator-ca.crt
       - --requestheader-extra-headers-prefix=X-Remote-Extra-
       - --requestheader-group-headers=X-Remote-Group
       - --requestheader-username-headers=X-Remote-User
       - --secure-port=443
-      - --service-account-key-file=/srv/kubernetes/service-account.key
+      - --service-account-key-file=/srv/kubernetes/kube-apiserver/service-account.pub
       - --service-cluster-ip-range=100.64.0.0/13
       - --storage-backend=etcd3
-      - --tls-cert-file=/srv/kubernetes/server.crt
-      - --tls-private-key-file=/srv/kubernetes/server.key
+      - --tls-cert-file=/srv/kubernetes/kube-apiserver/server.crt
+      - --tls-private-key-file=/srv/kubernetes/kube-apiserver/server.key
       - --v=2
       - --logtostderr=false
       - --alsologtostderr
@@ -98,13 +98,14 @@ contents: |
       - mountPath: /etc/openssl
         name: etcopenssl
         readOnly: true
-      - mountPath: /etc/kubernetes/pki/kube-apiserver
-        name: pki
       - mountPath: /etc/kubernetes/cloud.config
         name: cloudconfig
         readOnly: true
-      - mountPath: /srv/kubernetes
-        name: srvkube
+      - mountPath: /srv/kubernetes/ca.crt
+        name: kubernetesca
+        readOnly: true
+      - mountPath: /srv/kubernetes/kube-apiserver
+        name: srvkapi
         readOnly: true
       - mountPath: /srv/sshproxy
         name: srvsshproxy
@@ -146,15 +147,14 @@ contents: |
         path: /etc/openssl
       name: etcopenssl
     - hostPath:
-        path: /etc/kubernetes/pki/kube-apiserver
-        type: DirectoryOrCreate
-      name: pki
-    - hostPath:
         path: /etc/kubernetes/cloud.config
       name: cloudconfig
     - hostPath:
-        path: /srv/kubernetes
-      name: srvkube
+        path: /srv/kubernetes/ca.crt
+      name: kubernetesca
+    - hostPath:
+        path: /srv/kubernetes/kube-apiserver
+      name: srvkapi
     - hostPath:
         path: /srv/sshproxy
       name: srvsshproxy
@@ -163,29 +163,146 @@ path: /etc/kubernetes/manifests/kube-apiserver.manifest
 type: file
 ---
 mode: "0755"
-path: /srv/kubernetes
+path: /srv/kubernetes/kube-apiserver
 type: directory
+---
+contents: ""
+mode: "0644"
+path: /srv/kubernetes/kube-apiserver/apiserver-aggregator-ca.crt
+type: file
 ---
 contents:
   task:
-    Name: kubelet-api
-    signer: ca
+    Name: apiserver-aggregator
+    keypairID: ""
+    signer: apiserver-aggregator-ca
     subject:
-      CommonName: kubelet-api
+      CommonName: aggregator
     type: client
 mode: "0644"
-path: /srv/kubernetes/kubelet-api.crt
+path: /srv/kubernetes/kube-apiserver/apiserver-aggregator.crt
+type: file
+---
+contents:
+  task:
+    Name: apiserver-aggregator
+    keypairID: ""
+    signer: apiserver-aggregator-ca
+    subject:
+      CommonName: aggregator
+    type: client
+mode: "0600"
+path: /srv/kubernetes/kube-apiserver/apiserver-aggregator.key
+type: file
+---
+contents: ""
+mode: "0644"
+path: /srv/kubernetes/kube-apiserver/etcd-ca.crt
+type: file
+---
+contents:
+  task:
+    Name: etcd-client
+    keypairID: ""
+    signer: etcd-clients-ca
+    subject:
+      CommonName: kube-apiserver
+    type: client
+mode: "0644"
+path: /srv/kubernetes/kube-apiserver/etcd-client.crt
+type: file
+---
+contents:
+  task:
+    Name: etcd-client
+    keypairID: ""
+    signer: etcd-clients-ca
+    subject:
+      CommonName: kube-apiserver
+    type: client
+mode: "0600"
+path: /srv/kubernetes/kube-apiserver/etcd-client.key
 type: file
 ---
 contents:
   task:
     Name: kubelet-api
-    signer: ca
+    keypairID: "3"
+    signer: kubernetes-ca
+    subject:
+      CommonName: kubelet-api
+    type: client
+mode: "0644"
+path: /srv/kubernetes/kube-apiserver/kubelet-api.crt
+type: file
+---
+contents:
+  task:
+    Name: kubelet-api
+    keypairID: "3"
+    signer: kubernetes-ca
     subject:
       CommonName: kubelet-api
     type: client
 mode: "0600"
-path: /srv/kubernetes/kubelet-api.key
+path: /srv/kubernetes/kube-apiserver/kubelet-api.key
+type: file
+---
+contents:
+  task:
+    Name: master
+    alternateNames:
+    - kubernetes
+    - kubernetes.default
+    - kubernetes.default.svc
+    - kubernetes.default.svc.cluster.local
+    - api.minimal.example.com
+    - api.internal.minimal.example.com
+    - 100.64.0.1
+    - 127.0.0.1
+    includeRootCertificate: true
+    keypairID: "3"
+    signer: kubernetes-ca
+    subject:
+      CommonName: kubernetes-master
+    type: server
+mode: "0644"
+path: /srv/kubernetes/kube-apiserver/server.crt
+type: file
+---
+contents:
+  task:
+    Name: master
+    alternateNames:
+    - kubernetes
+    - kubernetes.default
+    - kubernetes.default.svc
+    - kubernetes.default.svc.cluster.local
+    - api.minimal.example.com
+    - api.internal.minimal.example.com
+    - 100.64.0.1
+    - 127.0.0.1
+    includeRootCertificate: true
+    keypairID: "3"
+    signer: kubernetes-ca
+    subject:
+      CommonName: kubernetes-master
+    type: server
+mode: "0600"
+path: /srv/kubernetes/kube-apiserver/server.key
+type: file
+---
+contents: |
+  -----BEGIN RSA PUBLIC KEY-----
+  MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBANiW3hfHTcKnxCig+uWhpVbOfH1pANKm
+  XVSysPKgE80QSU4tZ6m49pAEeIMsvwvDMaLsb2v6JvXe0qvCmueU+/sCAwEAAQ==
+  -----END RSA PUBLIC KEY-----
+  -----BEGIN RSA PUBLIC KEY-----
+  MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAKOE64nZbH+GM91AIrqf7HEk4hvzqsZF
+  Ftxc+8xir1XC3mI/RhCCrs6AdVRZNZ26A6uHArhi33c2kHQkCjyLA7sCAwEAAQ==
+  -----END RSA PUBLIC KEY-----
+mode: "0600"
+path: /srv/kubernetes/kube-apiserver/service-account.pub
 type: file
 ---
 contents: ""
@@ -194,8 +311,40 @@ mode: "0400"
 path: /var/log/kube-apiserver.log
 type: file
 ---
+Name: apiserver-aggregator
+keypairID: ""
+signer: apiserver-aggregator-ca
+subject:
+  CommonName: aggregator
+type: client
+---
+Name: etcd-client
+keypairID: ""
+signer: etcd-clients-ca
+subject:
+  CommonName: kube-apiserver
+type: client
+---
 Name: kubelet-api
-signer: ca
+keypairID: "3"
+signer: kubernetes-ca
 subject:
   CommonName: kubelet-api
 type: client
+---
+Name: master
+alternateNames:
+- kubernetes
+- kubernetes.default
+- kubernetes.default.svc
+- kubernetes.default.svc.cluster.local
+- api.minimal.example.com
+- api.internal.minimal.example.com
+- 100.64.0.1
+- 127.0.0.1
+includeRootCertificate: true
+keypairID: "3"
+signer: kubernetes-ca
+subject:
+  CommonName: kubernetes-master
+type: server

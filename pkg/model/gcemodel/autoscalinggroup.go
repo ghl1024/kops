@@ -41,7 +41,7 @@ type AutoscalingGroupModelBuilder struct {
 	*GCEModelContext
 
 	BootstrapScriptBuilder *model.BootstrapScriptBuilder
-	Lifecycle              *fi.Lifecycle
+	Lifecycle              fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &AutoscalingGroupModelBuilder{}
@@ -87,6 +87,8 @@ func (b *AutoscalingGroupModelBuilder) buildInstanceTemplate(c *fi.ModelBuilderC
 				// TODO: Support preemptible nodes?
 				Preemptible: fi.Bool(false),
 
+				HasExternalIP: fi.Bool(b.Cluster.Spec.Topology.Masters == kops.TopologyPublic),
+
 				Scopes: []string{
 					"compute-rw",
 					"monitoring",
@@ -100,7 +102,7 @@ func (b *AutoscalingGroupModelBuilder) buildInstanceTemplate(c *fi.ModelBuilderC
 				},
 			}
 
-			nodeRole, err := iam.BuildNodeRoleSubject(ig.Spec.Role)
+			nodeRole, err := iam.BuildNodeRoleSubject(ig.Spec.Role, false)
 			if err != nil {
 				return nil, err
 			}

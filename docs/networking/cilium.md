@@ -44,6 +44,7 @@ kops create cluster \
 
 For existing clusters, add the following to `spec.etcdClusters`:
 Make sure `instanceGroup` match the other etcd clusters.
+You should also enable auto compaction.
 
 ```yaml
   - etcdMembers:
@@ -53,6 +54,12 @@ Make sure `instanceGroup` match the other etcd clusters.
       name: b
     - instanceGroup: master-az-1c
       name: c
+    manager:
+      env:
+      - name: ETCD_AUTO_COMPACTION_MODE
+        value: revision
+      - name: ETCD_AUTO_COMPACTION_RETENTION
+        value: "2500"
     name: cilium
 ```
 
@@ -103,11 +110,19 @@ kops rolling-update cluster --yes
 
 ### Enabling Cilium ENI IPAM
 
-This feature is in beta state as of kOps 1.18.
+{{ kops_feature_table(kops_added_default='1.18') }}
 
-As of kOps 1.18, you can have Cilium provision AWS managed addresses and attach them directly to Pods much like Lyft VPC and AWS VPC. See [the Cilium docs for more information](https://docs.cilium.io/en/v1.6/concepts/ipam/eni/)
+This feature is in beta state.
 
-When using ENI IPAM you need to disable masquerading in Cilium as well.
+You can have Cilium provision AWS managed addresses and attach them directly to Pods much like Lyft VPC and AWS VPC. See [the Cilium docs for more information](https://docs.cilium.io/en/v1.6/concepts/ipam/eni/)
+
+```yaml
+  networking:
+    cilium:
+      ipam: eni
+```
+
+In kOps versions before 1.22, when using ENI IPAM you need to explicitly disable masquerading in Cilium as well.
 
 ```yaml
   networking:
@@ -148,6 +163,23 @@ As of kOps 1.20, it is possible to choose your own values for Cilium Agents + Op
       cpuRequest: "25m"
       memoryRequest: "128Mi"
 ```
+
+## Hubble
+{{ kops_feature_table(kops_added_default='1.20.1', k8s_min='1.20') }}
+
+Hubble is the observability layer of Cilium and can be used to obtain cluster-wide visibility into the network and security layer of your Kubernetes cluster. See the [Hubble documentation](https://docs.cilium.io/en/v1.10/gettingstarted/hubble_setup/) for more information.
+
+Hubble can be enabled by adding the following to the spec:
+```yaml
+  networking:
+    cilium:
+      hubble:
+        enabled: true
+```
+
+This will enable Hubble in the Cilium agent as well as install hubble-relay. kOps will also configure mTLS between the Cilium agent and relay. Note that since the Hubble UI does not support TLS, the relay is not configured to listen on a secure port.
+
+The Hubble UI has to be installed separatly.
 
 ## Getting help
 

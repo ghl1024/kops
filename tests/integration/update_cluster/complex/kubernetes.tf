@@ -101,11 +101,12 @@ resource "aws_autoscaling_group" "master-us-test-1a-masters-complex-example-com"
     id      = aws_launch_template.master-us-test-1a-masters-complex-example-com.id
     version = aws_launch_template.master-us-test-1a-masters-complex-example-com.latest_version
   }
-  load_balancers      = ["my-external-lb-1"]
-  max_size            = 1
-  metrics_granularity = "1Minute"
-  min_size            = 1
-  name                = "master-us-test-1a.masters.complex.example.com"
+  load_balancers        = ["my-external-lb-1"]
+  max_size              = 1
+  metrics_granularity   = "1Minute"
+  min_size              = 1
+  name                  = "master-us-test-1a.masters.complex.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -176,12 +177,13 @@ resource "aws_autoscaling_group" "nodes-complex-example-com" {
     id      = aws_launch_template.nodes-complex-example-com.id
     version = aws_launch_template.nodes-complex-example-com.latest_version
   }
-  load_balancers      = ["my-external-lb-1"]
-  max_size            = 2
-  metrics_granularity = "1Minute"
-  min_size            = 2
-  name                = "nodes.complex.example.com"
-  suspended_processes = ["AZRebalance"]
+  load_balancers        = ["my-external-lb-1"]
+  max_size              = 2
+  metrics_granularity   = "1Minute"
+  min_size              = 2
+  name                  = "nodes.complex.example.com"
+  protect_from_scale_in = false
+  suspended_processes   = ["AZRebalance"]
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -290,18 +292,6 @@ resource "aws_iam_instance_profile" "nodes-complex-example-com" {
   }
 }
 
-resource "aws_iam_role_policy" "masters-complex-example-com" {
-  name   = "masters.complex.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_masters.complex.example.com_policy")
-  role   = aws_iam_role.masters-complex-example-com.name
-}
-
-resource "aws_iam_role_policy" "nodes-complex-example-com" {
-  name   = "nodes.complex.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_nodes.complex.example.com_policy")
-  role   = aws_iam_role.nodes-complex-example-com.name
-}
-
 resource "aws_iam_role" "masters-complex-example-com" {
   assume_role_policy   = file("${path.module}/data/aws_iam_role_masters.complex.example.com_policy")
   name                 = "masters.complex.example.com"
@@ -326,6 +316,18 @@ resource "aws_iam_role" "nodes-complex-example-com" {
     "foo/bar"                                   = "fib+baz"
     "kubernetes.io/cluster/complex.example.com" = "owned"
   }
+}
+
+resource "aws_iam_role_policy" "masters-complex-example-com" {
+  name   = "masters.complex.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_masters.complex.example.com_policy")
+  role   = aws_iam_role.masters-complex-example-com.name
+}
+
+resource "aws_iam_role_policy" "nodes-complex-example-com" {
+  name   = "nodes.complex.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_nodes.complex.example.com_policy")
+  role   = aws_iam_role.nodes-complex-example-com.name
 }
 
 resource "aws_internet_gateway" "complex-example-com" {
@@ -369,10 +371,14 @@ resource "aws_launch_template" "master-us-test-1a-masters-complex-example-com" {
     http_put_response_hop_limit = 1
     http_tokens                 = "required"
   }
+  monitoring {
+    enabled = false
+  }
   name = "master-us-test-1a.masters.complex.example.com"
   network_interfaces {
     associate_public_ip_address = true
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.masters-complex-example-com.id, "sg-exampleid5", "sg-exampleid6"]
   }
   tag_specifications {
@@ -471,6 +477,7 @@ resource "aws_launch_template" "nodes-complex-example-com" {
   network_interfaces {
     associate_public_ip_address = true
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.nodes-complex-example-com.id, "sg-exampleid3", "sg-exampleid4"]
   }
   tag_specifications {
@@ -513,6 +520,24 @@ resource "aws_launch_template" "nodes-complex-example-com" {
     "kubernetes.io/cluster/complex.example.com"                                  = "owned"
   }
   user_data = filebase64("${path.module}/data/aws_launch_template_nodes.complex.example.com_user_data")
+}
+
+resource "aws_lb" "api-complex-example-com" {
+  enable_cross_zone_load_balancing = true
+  internal                         = false
+  load_balancer_type               = "network"
+  name                             = "api-complex-example-com-vd3t5n"
+  subnet_mapping {
+    allocation_id = "eipalloc-012345a678b9cdefa"
+    subnet_id     = aws_subnet.us-test-1a-complex-example-com.id
+  }
+  tags = {
+    "KubernetesCluster"                         = "complex.example.com"
+    "Name"                                      = "api.complex.example.com"
+    "Owner"                                     = "John Doe"
+    "foo/bar"                                   = "fib+baz"
+    "kubernetes.io/cluster/complex.example.com" = "owned"
+  }
 }
 
 resource "aws_lb_listener" "api-complex-example-com-443" {
@@ -575,22 +600,22 @@ resource "aws_lb_target_group" "tls-complex-example-com-5nursn" {
   vpc_id = aws_vpc.complex-example-com.id
 }
 
-resource "aws_lb" "api-complex-example-com" {
-  enable_cross_zone_load_balancing = true
-  internal                         = false
-  load_balancer_type               = "network"
-  name                             = "api-complex-example-com-vd3t5n"
-  subnet_mapping {
-    allocation_id = "eipalloc-012345a678b9cdefa"
-    subnet_id     = aws_subnet.us-test-1a-complex-example-com.id
-  }
-  tags = {
-    "KubernetesCluster"                         = "complex.example.com"
-    "Name"                                      = "api.complex.example.com"
-    "Owner"                                     = "John Doe"
-    "foo/bar"                                   = "fib+baz"
-    "kubernetes.io/cluster/complex.example.com" = "owned"
-  }
+resource "aws_route" "route-0-0-0-0--0" {
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.complex-example-com.id
+  route_table_id         = aws_route_table.complex-example-com.id
+}
+
+resource "aws_route" "route-__--0" {
+  destination_ipv6_cidr_block = "::/0"
+  gateway_id                  = aws_internet_gateway.complex-example-com.id
+  route_table_id              = aws_route_table.complex-example-com.id
+}
+
+resource "aws_route" "route-private-us-test-1a-0-0-0-0--0" {
+  destination_cidr_block = "0.0.0.0/0"
+  route_table_id         = aws_route_table.private-us-test-1a-complex-example-com.id
+  transit_gateway_id     = "tgw-123456"
 }
 
 resource "aws_route53_record" "api-complex-example-com" {
@@ -602,21 +627,6 @@ resource "aws_route53_record" "api-complex-example-com" {
   name    = "api.complex.example.com"
   type    = "A"
   zone_id = "/hostedzone/Z1AFAKE1ZON3YO"
-}
-
-resource "aws_route_table_association" "private-us-east-1a-private-complex-example-com" {
-  route_table_id = aws_route_table.private-us-test-1a-complex-example-com.id
-  subnet_id      = aws_subnet.us-east-1a-private-complex-example-com.id
-}
-
-resource "aws_route_table_association" "us-east-1a-utility-complex-example-com" {
-  route_table_id = aws_route_table.complex-example-com.id
-  subnet_id      = aws_subnet.us-east-1a-utility-complex-example-com.id
-}
-
-resource "aws_route_table_association" "us-test-1a-complex-example-com" {
-  route_table_id = aws_route_table.complex-example-com.id
-  subnet_id      = aws_subnet.us-test-1a-complex-example-com.id
 }
 
 resource "aws_route_table" "complex-example-com" {
@@ -643,16 +653,177 @@ resource "aws_route_table" "private-us-test-1a-complex-example-com" {
   vpc_id = aws_vpc.complex-example-com.id
 }
 
-resource "aws_route" "route-0-0-0-0--0" {
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.complex-example-com.id
-  route_table_id         = aws_route_table.complex-example-com.id
+resource "aws_route_table_association" "private-us-east-1a-private-complex-example-com" {
+  route_table_id = aws_route_table.private-us-test-1a-complex-example-com.id
+  subnet_id      = aws_subnet.us-east-1a-private-complex-example-com.id
 }
 
-resource "aws_route" "route-private-us-test-1a-0-0-0-0--0" {
-  destination_cidr_block = "0.0.0.0/0"
-  route_table_id         = aws_route_table.private-us-test-1a-complex-example-com.id
-  transit_gateway_id     = "tgw-123456"
+resource "aws_route_table_association" "us-east-1a-utility-complex-example-com" {
+  route_table_id = aws_route_table.complex-example-com.id
+  subnet_id      = aws_subnet.us-east-1a-utility-complex-example-com.id
+}
+
+resource "aws_route_table_association" "us-test-1a-complex-example-com" {
+  route_table_id = aws_route_table.complex-example-com.id
+  subnet_id      = aws_subnet.us-test-1a-complex-example-com.id
+}
+
+resource "aws_s3_bucket_object" "cluster-completed-spec" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_cluster-completed.spec_content")
+  key                    = "clusters.example.com/complex.example.com/cluster-completed.spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-bootstrap" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-bootstrap_content")
+  key                    = "clusters.example.com/complex.example.com/addons/bootstrap-channel.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-core-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-core.addons.k8s.io_content")
+  key                    = "clusters.example.com/complex.example.com/addons/core.addons.k8s.io/v1.4.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-coredns-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-coredns.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/complex.example.com/addons/coredns.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-dns-controller-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-dns-controller.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/complex.example.com/addons/dns-controller.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-kops-controller-addons-k8s-io-k8s-1-16" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-kops-controller.addons.k8s.io-k8s-1.16_content")
+  key                    = "clusters.example.com/complex.example.com/addons/kops-controller.addons.k8s.io/k8s-1.16.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-kubelet-api-rbac-addons-k8s-io-k8s-1-9" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-kubelet-api.rbac.addons.k8s.io-k8s-1.9_content")
+  key                    = "clusters.example.com/complex.example.com/addons/kubelet-api.rbac.addons.k8s.io/k8s-1.9.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-limit-range-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-limit-range.addons.k8s.io_content")
+  key                    = "clusters.example.com/complex.example.com/addons/limit-range.addons.k8s.io/v1.5.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "complex-example-com-addons-storage-aws-addons-k8s-io-v1-15-0" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_complex.example.com-addons-storage-aws.addons.k8s.io-v1.15.0_content")
+  key                    = "clusters.example.com/complex.example.com/addons/storage-aws.addons.k8s.io/v1.15.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-events_content")
+  key                    = "clusters.example.com/complex.example.com/backups/etcd/events/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-main_content")
+  key                    = "clusters.example.com/complex.example.com/backups/etcd/main/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "kops-version-txt" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_kops-version.txt_content")
+  key                    = "clusters.example.com/complex.example.com/kops-version.txt"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-events_content")
+  key                    = "clusters.example.com/complex.example.com/manifests/etcd/events.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-main_content")
+  key                    = "clusters.example.com/complex.example.com/manifests/etcd/main.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-static-kube-apiserver-healthcheck" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-static-kube-apiserver-healthcheck_content")
+  key                    = "clusters.example.com/complex.example.com/manifests/static/kube-apiserver-healthcheck.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-master-us-test-1a" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-master-us-test-1a_content")
+  key                    = "clusters.example.com/complex.example.com/igconfig/master/master-us-test-1a/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-nodes" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-nodes_content")
+  key                    = "clusters.example.com/complex.example.com/igconfig/node/nodes/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_security_group" "api-elb-complex-example-com" {
+  description = "Security group for api ELB"
+  name        = "api-elb.complex.example.com"
+  tags = {
+    "KubernetesCluster"                         = "complex.example.com"
+    "Name"                                      = "api-elb.complex.example.com"
+    "Owner"                                     = "John Doe"
+    "foo/bar"                                   = "fib+baz"
+    "kubernetes.io/cluster/complex.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.complex-example-com.id
+}
+
+resource "aws_security_group" "masters-complex-example-com" {
+  description = "Security group for masters"
+  name        = "masters.complex.example.com"
+  tags = {
+    "KubernetesCluster"                         = "complex.example.com"
+    "Name"                                      = "masters.complex.example.com"
+    "Owner"                                     = "John Doe"
+    "foo/bar"                                   = "fib+baz"
+    "kubernetes.io/cluster/complex.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.complex-example-com.id
+}
+
+resource "aws_security_group" "nodes-complex-example-com" {
+  description = "Security group for nodes"
+  name        = "nodes.complex.example.com"
+  tags = {
+    "KubernetesCluster"                         = "complex.example.com"
+    "Name"                                      = "nodes.complex.example.com"
+    "Owner"                                     = "John Doe"
+    "foo/bar"                                   = "fib+baz"
+    "kubernetes.io/cluster/complex.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.complex-example-com.id
 }
 
 resource "aws_security_group_rule" "from-1-1-1-0--24-ingress-tcp-443to443-masters-complex-example-com" {
@@ -682,36 +853,18 @@ resource "aws_security_group_rule" "from-1-1-1-1--32-ingress-tcp-22to22-nodes-co
   type              = "ingress"
 }
 
-resource "aws_security_group_rule" "from-2001_0_8500__--40-ingress-tcp-443to443-masters-complex-example-com" {
-  cidr_blocks       = ["2001:0:8500::/40"]
-  from_port         = 443
-  protocol          = "tcp"
-  security_group_id = aws_security_group.masters-complex-example-com.id
-  to_port           = 443
-  type              = "ingress"
-}
-
-resource "aws_security_group_rule" "from-2001_0_85a3__--48-ingress-tcp-22to22-masters-complex-example-com" {
-  cidr_blocks       = ["2001:0:85a3::/48"]
-  from_port         = 22
-  protocol          = "tcp"
-  security_group_id = aws_security_group.masters-complex-example-com.id
-  to_port           = 22
-  type              = "ingress"
-}
-
-resource "aws_security_group_rule" "from-2001_0_85a3__--48-ingress-tcp-22to22-nodes-complex-example-com" {
-  cidr_blocks       = ["2001:0:85a3::/48"]
-  from_port         = 22
-  protocol          = "tcp"
-  security_group_id = aws_security_group.nodes-complex-example-com.id
-  to_port           = 22
-  type              = "ingress"
-}
-
 resource "aws_security_group_rule" "from-masters-complex-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.masters-complex-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-masters-complex-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.masters-complex-example-com.id
   to_port           = 0
@@ -739,6 +892,15 @@ resource "aws_security_group_rule" "from-masters-complex-example-com-ingress-all
 resource "aws_security_group_rule" "from-nodes-complex-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.nodes-complex-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-nodes-complex-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.nodes-complex-example-com.id
   to_port           = 0
@@ -826,15 +988,6 @@ resource "aws_security_group_rule" "icmp-pmtu-api-elb-1-1-1-0--24" {
   type              = "ingress"
 }
 
-resource "aws_security_group_rule" "icmp-pmtu-api-elb-2001_0_8500__--40" {
-  cidr_blocks       = ["2001:0:8500::/40"]
-  from_port         = 3
-  protocol          = "icmp"
-  security_group_id = aws_security_group.masters-complex-example-com.id
-  to_port           = 4
-  type              = "ingress"
-}
-
 resource "aws_security_group_rule" "nodeport-tcp-external-to-node-1-2-3-4--32" {
   cidr_blocks       = ["1.2.3.4/32"]
   from_port         = 28000
@@ -880,54 +1033,6 @@ resource "aws_security_group_rule" "tcp-api-1-1-1-0--24" {
   type              = "ingress"
 }
 
-resource "aws_security_group_rule" "tcp-api-2001_0_8500__--40" {
-  cidr_blocks       = ["2001:0:8500::/40"]
-  from_port         = 8443
-  protocol          = "tcp"
-  security_group_id = aws_security_group.masters-complex-example-com.id
-  to_port           = 8443
-  type              = "ingress"
-}
-
-resource "aws_security_group" "api-elb-complex-example-com" {
-  description = "Security group for api ELB"
-  name        = "api-elb.complex.example.com"
-  tags = {
-    "KubernetesCluster"                         = "complex.example.com"
-    "Name"                                      = "api-elb.complex.example.com"
-    "Owner"                                     = "John Doe"
-    "foo/bar"                                   = "fib+baz"
-    "kubernetes.io/cluster/complex.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.complex-example-com.id
-}
-
-resource "aws_security_group" "masters-complex-example-com" {
-  description = "Security group for masters"
-  name        = "masters.complex.example.com"
-  tags = {
-    "KubernetesCluster"                         = "complex.example.com"
-    "Name"                                      = "masters.complex.example.com"
-    "Owner"                                     = "John Doe"
-    "foo/bar"                                   = "fib+baz"
-    "kubernetes.io/cluster/complex.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.complex-example-com.id
-}
-
-resource "aws_security_group" "nodes-complex-example-com" {
-  description = "Security group for nodes"
-  name        = "nodes.complex.example.com"
-  tags = {
-    "KubernetesCluster"                         = "complex.example.com"
-    "Name"                                      = "nodes.complex.example.com"
-    "Owner"                                     = "John Doe"
-    "foo/bar"                                   = "fib+baz"
-    "kubernetes.io/cluster/complex.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.complex-example-com.id
-}
-
 resource "aws_subnet" "us-east-1a-private-complex-example-com" {
   availability_zone = "us-test-1a"
   cidr_block        = "172.20.64.0/19"
@@ -954,6 +1059,7 @@ resource "aws_subnet" "us-east-1a-utility-complex-example-com" {
     "foo/bar"                                   = "fib+baz"
     "kubernetes.io/cluster/complex.example.com" = "owned"
     "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/role/internal-elb"           = "1"
   }
   vpc_id = aws_vpc.complex-example-com.id
 }
@@ -969,13 +1075,23 @@ resource "aws_subnet" "us-test-1a-complex-example-com" {
     "foo/bar"                                   = "fib+baz"
     "kubernetes.io/cluster/complex.example.com" = "owned"
     "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/role/internal-elb"           = "1"
   }
   vpc_id = aws_vpc.complex-example-com.id
 }
 
-resource "aws_vpc_dhcp_options_association" "complex-example-com" {
-  dhcp_options_id = aws_vpc_dhcp_options.complex-example-com.id
-  vpc_id          = aws_vpc.complex-example-com.id
+resource "aws_vpc" "complex-example-com" {
+  assign_generated_ipv6_cidr_block = true
+  cidr_block                       = "172.20.0.0/16"
+  enable_dns_hostnames             = true
+  enable_dns_support               = true
+  tags = {
+    "KubernetesCluster"                         = "complex.example.com"
+    "Name"                                      = "complex.example.com"
+    "Owner"                                     = "John Doe"
+    "foo/bar"                                   = "fib+baz"
+    "kubernetes.io/cluster/complex.example.com" = "owned"
+  }
 }
 
 resource "aws_vpc_dhcp_options" "complex-example-com" {
@@ -990,6 +1106,11 @@ resource "aws_vpc_dhcp_options" "complex-example-com" {
   }
 }
 
+resource "aws_vpc_dhcp_options_association" "complex-example-com" {
+  dhcp_options_id = aws_vpc_dhcp_options.complex-example-com.id
+  vpc_id          = aws_vpc.complex-example-com.id
+}
+
 resource "aws_vpc_ipv4_cidr_block_association" "cidr-10-1-0-0--16" {
   cidr_block = "10.1.0.0/16"
   vpc_id     = aws_vpc.complex-example-com.id
@@ -998,19 +1119,6 @@ resource "aws_vpc_ipv4_cidr_block_association" "cidr-10-1-0-0--16" {
 resource "aws_vpc_ipv4_cidr_block_association" "cidr-10-2-0-0--16" {
   cidr_block = "10.2.0.0/16"
   vpc_id     = aws_vpc.complex-example-com.id
-}
-
-resource "aws_vpc" "complex-example-com" {
-  cidr_block           = "172.20.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-  tags = {
-    "KubernetesCluster"                         = "complex.example.com"
-    "Name"                                      = "complex.example.com"
-    "Owner"                                     = "John Doe"
-    "foo/bar"                                   = "fib+baz"
-    "kubernetes.io/cluster/complex.example.com" = "owned"
-  }
 }
 
 terraform {

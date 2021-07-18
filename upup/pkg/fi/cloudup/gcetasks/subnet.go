@@ -25,12 +25,13 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type Subnet struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	GCEName *string
 	Network *Network
@@ -49,7 +50,7 @@ func (e *Subnet) CompareWithID() *string {
 func (e *Subnet) Find(c *fi.Context) (*Subnet, error) {
 	cloud := c.Cloud.(gce.GCECloud)
 
-	s, err := cloud.Compute().Subnetworks.Get(cloud.Project(), cloud.Region(), *e.GCEName).Do()
+	s, err := cloud.Compute().Subnetworks().Get(cloud.Project(), cloud.Region(), *e.GCEName)
 	if err != nil {
 		if gce.IsNotFound(err) {
 			return nil, nil
@@ -107,12 +108,12 @@ func (_ *Subnet) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Subnet) error {
 			})
 		}
 
-		_, err := cloud.Compute().Subnetworks.Insert(t.Cloud.Project(), t.Cloud.Region(), subnet).Do()
+		_, err := cloud.Compute().Subnetworks().Insert(t.Cloud.Project(), t.Cloud.Region(), subnet)
 		if err != nil {
 			return fmt.Errorf("error creating Subnet: %v", err)
 		}
 	} else {
-		subnet, err := cloud.Compute().Subnetworks.Get(cloud.Project(), cloud.Region(), *e.GCEName).Do()
+		subnet, err := cloud.Compute().Subnetworks().Get(cloud.Project(), cloud.Region(), *e.GCEName)
 		if err != nil {
 			return fmt.Errorf("error fetching subnet for patch: %v", err)
 		}
@@ -137,12 +138,12 @@ func (_ *Subnet) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Subnet) error {
 				}
 			}
 			if patch {
-				_, err = t.Cloud.Compute().Subnetworks.Patch(t.Cloud.Project(), t.Cloud.Region(), subnet.Name, subnet).Do()
+				_, err = t.Cloud.Compute().Subnetworks().Patch(t.Cloud.Project(), t.Cloud.Region(), subnet.Name, subnet)
 				if err != nil {
 					return fmt.Errorf("error patching Subnet: %v", err)
 				}
 				patch = false
-				subnet, err = cloud.Compute().Subnetworks.Get(cloud.Project(), cloud.Region(), *e.GCEName).Do()
+				subnet, err = cloud.Compute().Subnetworks().Get(cloud.Project(), cloud.Region(), *e.GCEName)
 				if err != nil {
 					return fmt.Errorf("error fetching subnet for patch: %v", err)
 				}
@@ -167,11 +168,11 @@ func (_ *Subnet) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Subnet) error {
 						IpCidrRange: v,
 					})
 				}
-				_, err = t.Cloud.Compute().Subnetworks.Patch(t.Cloud.Project(), t.Cloud.Region(), subnet.Name, subnet).Do()
+				_, err = t.Cloud.Compute().Subnetworks().Patch(t.Cloud.Project(), t.Cloud.Region(), subnet.Name, subnet)
 				if err != nil {
 					return fmt.Errorf("error patching Subnet: %v", err)
 				}
-				_, err = cloud.Compute().Subnetworks.Get(cloud.Project(), cloud.Region(), *e.GCEName).Do()
+				_, err = cloud.Compute().Subnetworks().Get(cloud.Project(), cloud.Region(), *e.GCEName)
 				if err != nil {
 					return fmt.Errorf("error fetching subnet for patch: %v", err)
 				}
@@ -202,10 +203,10 @@ func (e *Subnet) URL(project string, region string) string {
 }
 
 type terraformSubnet struct {
-	Name    *string            `json:"name" cty:"name"`
-	Network *terraform.Literal `json:"network" cty:"network"`
-	Region  *string            `json:"region" cty:"region"`
-	CIDR    *string            `json:"ip_cidr_range" cty:"ip_cidr_range"`
+	Name    *string                  `json:"name" cty:"name"`
+	Network *terraformWriter.Literal `json:"network" cty:"network"`
+	Region  *string                  `json:"region" cty:"region"`
+	CIDR    *string                  `json:"ip_cidr_range" cty:"ip_cidr_range"`
 
 	// SecondaryIPRange defines additional IP ranges
 	SecondaryIPRange []terraformSubnetRange `json:"secondary_ip_range,omitempty" cty:"secondary_ip_range"`
@@ -234,6 +235,6 @@ func (_ *Subnet) RenderSubnet(t *terraform.TerraformTarget, a, e, changes *Subne
 	return t.RenderResource("google_compute_subnetwork", *e.Name, tf)
 }
 
-func (i *Subnet) TerraformName() *terraform.Literal {
-	return terraform.LiteralProperty("google_compute_subnetwork", *i.Name, "name")
+func (i *Subnet) TerraformName() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("google_compute_subnetwork", *i.Name, "name")
 }

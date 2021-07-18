@@ -52,35 +52,13 @@ func (s *Server) getNodeConfig(ctx context.Context, req *nodeup.BootstrapRequest
 	}
 
 	{
-		p := s.configBase.Join("instancegroup", instanceGroupName)
+		p := s.configBase.Join("igconfig", "node", instanceGroupName, "nodeupconfig.yaml")
 
 		b, err := p.ReadFile()
 		if err != nil {
-			return nil, fmt.Errorf("error loading InstanceGroup %q: %v", p, err)
+			return nil, fmt.Errorf("error loading NodeupConfig %q: %v", p, err)
 		}
-		nodeConfig.InstanceGroupConfig = string(b)
-	}
-
-	// We populate some certificates that we know the node will need.
-	for _, name := range []string{"ca"} {
-		cert, _, _, err := s.keystore.FindKeypair(name)
-		if err != nil {
-			return nil, fmt.Errorf("error getting certificate %q: %w", name, err)
-		}
-
-		if cert == nil {
-			return nil, fmt.Errorf("certificate %q not found", name)
-		}
-
-		certData, err := cert.AsString()
-		if err != nil {
-			return nil, fmt.Errorf("error marshalling certificate %q: %w", name, err)
-		}
-
-		nodeConfig.Certificates = append(nodeConfig.Certificates, &nodeup.NodeConfigCertificate{
-			Name: name,
-			Cert: certData,
-		})
+		nodeConfig.NodeupConfig = string(b)
 	}
 
 	return nodeConfig, nil

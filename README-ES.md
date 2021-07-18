@@ -48,7 +48,6 @@ Para instalar un Kubernetes cluster en GCE por fabor siga esta [guide](/docs/get
 * [Templating](/docs/cluster_template.md) y ejecutar modos de simulacro para crear
  Manifiestos
 * Escoge de ocho proveedores CNI diferentes [Networking](/docs/networking.md)
-* Soporta Actualizarse desde [kube-up](/docs/upgrade_from_kubeup.md)
 * Capacidad para añadir contenedores, como enganches, y archivos a nodos vía [cluster manifest](/docs/cluster_spec.md)
 
 
@@ -81,13 +80,13 @@ particular de Kubernetes.
 
 #### Compatibilidad Matrix
 
-| kOps version  | k8s 1.12.x | k8s 1.13.x | k8s 1.14.x | k8s 1.15.x | k8s 1.16.x |
+| kOps version  | k8s 1.17.x | k8s 1.18.x | k8s 1.19.x | k8s 1.20.x | k8s 1.21.x |
 |---------------|------------|------------|------------|------------|------------|
-| 1.16.0        | ✔          | ✔          | ✔          | ✔          | ✔          |
-| 1.15.x        | ✔          | ✔          | ✔          | ✔          | ⚫         |
-| 1.14.x        | ✔          | ✔          | ✔          | ⚫         | ⚫         |
-| ~~1.13.x~~    | ✔          | ✔          | ⚫         | ⚫         | ⚫         |
-| ~~1.12.x~~    | ✔          | ⚫         | ⚫         | ⚫         | ⚫         |
+| 1.21.0        | ✔          | ✔          | ✔          | ✔          | ✔          |
+| 1.20.x        | ✔          | ✔          | ✔          | ✔          | ⚫         |
+| ~~1.19.x~~    | ✔          | ✔          | ✔          | ⚫         | ⚫         |
+| ~~1.18.x~~    | ✔          | ✔          | ⚫         | ⚫         | ⚫         |
+| ~~1.17.x~~    | ✔          | ⚫         | ⚫         | ⚫         | ⚫         |
 
 Utilice la última versión de kOps para todas las versiones de Kubernetes, con la advertencia de que las versiones más altas de Kubernetes no cuentan con el respaldo _oficial_ de kOps.
 

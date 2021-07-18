@@ -53,10 +53,6 @@ func (b *CiliumBuilder) Build(c *fi.ModelBuilderContext) error {
 		return err
 	}
 
-	image := "docker.io/cilium/cilium:" + cilium.Version
-
-	b.WarmPullImage(c, image)
-
 	return nil
 
 }
@@ -104,63 +100,53 @@ WantedBy=multi-user.target
 }
 
 func (b *CiliumBuilder) buildCiliumEtcdSecrets(c *fi.ModelBuilderContext) error {
-
-	if b.IsMaster {
-		d := "/etc/kubernetes/pki/etcd-manager-cilium"
-
-		keys := make(map[string]string)
-		keys["etcd-manager-ca"] = "etcd-manager-ca-cilium"
-		keys["etcd-peers-ca"] = "etcd-peers-ca-cilium"
-		keys["etcd-clients-ca"] = "etcd-clients-ca-cilium"
-
-		for fileName, keystoreName := range keys {
-			_, err := b.KeyStore.FindCert(keystoreName)
-			if err != nil {
-				return err
-			}
-
-			if err := b.BuildCertificateTask(c, keystoreName, d+"/"+fileName+".crt", nil); err != nil {
-				return err
-			}
-			if err := b.BuildPrivateKeyTask(c, keystoreName, d+"/"+fileName+".key", nil); err != nil {
-				return err
-			}
-		}
-	}
-
 	name := "etcd-client-cilium"
 	dir := "/etc/kubernetes/pki/cilium"
 	signer := "etcd-clients-ca-cilium"
-	if b.UseKopsControllerForNodeBootstrap() && !b.IsMaster {
-		cert, key := b.GetBootstrapCert(name)
-
-		c.AddTask(&nodetasks.File{
-			Path:           filepath.Join(dir, name+".crt"),
-			Contents:       cert,
-			Type:           nodetasks.FileType_File,
-			Mode:           fi.String("0644"),
-			BeforeServices: []string{"kubelet.service"},
-		})
-
-		c.AddTask(&nodetasks.File{
-			Path:           filepath.Join(dir, name+".key"),
-			Contents:       key,
-			Type:           nodetasks.FileType_File,
-			Mode:           fi.String("0400"),
-			BeforeServices: []string{"kubelet.service"},
-		})
-
-		return b.BuildCertificateTask(c, signer, filepath.Join(dir, "etcd-ca.crt"), nil)
-	} else {
+	c.AddTask(&nodetasks.File{
+		Path:     filepath.Join(dir, "etcd-ca.crt"),
+		Contents: fi.NewStringResource(b.NodeupConfig.CAs[signer]),
+		Type:     nodetasks.FileType_File,
+		Mode:     fi.String("0600"),
+	})
+	if b.HasAPIServer {
 		issueCert := &nodetasks.IssueCert{
-			Name:   name,
-			Signer: signer,
-			Type:   "client",
+			Name:      name,
+			Signer:    signer,
+			KeypairID: b.NodeupConfig.KeypairIDs[signer],
+			Type:      "client",
 			Subject: nodetasks.PKIXName{
 				CommonName: "cilium",
 			},
 		}
 		c.AddTask(issueCert)
-		return issueCert.AddFileTasks(c, dir, name, "etcd-ca", nil)
+		return issueCert.AddFileTasks(c, dir, name, "", nil)
+	} else {
+		if b.UseKopsControllerForNodeBootstrap() {
+			cert, key, err := b.GetBootstrapCert(name, signer)
+			if err != nil {
+				return err
+			}
+
+			c.AddTask(&nodetasks.File{
+				Path:           filepath.Join(dir, name+".crt"),
+				Contents:       cert,
+				Type:           nodetasks.FileType_File,
+				Mode:           fi.String("0644"),
+				BeforeServices: []string{"kubelet.service"},
+			})
+
+			c.AddTask(&nodetasks.File{
+				Path:           filepath.Join(dir, name+".key"),
+				Contents:       key,
+				Type:           nodetasks.FileType_File,
+				Mode:           fi.String("0400"),
+				BeforeServices: []string{"kubelet.service"},
+			})
+
+			return nil
+		} else {
+			return b.BuildCertificatePairTask(c, name, dir, name, nil, []string{"kubelet.service"})
+		}
 	}
 }

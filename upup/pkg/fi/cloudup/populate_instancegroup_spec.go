@@ -105,7 +105,7 @@ func PopulateInstanceGroupSpec(cluster *kops.Cluster, input *kops.InstanceGroup,
 		}
 	} else {
 		if ig.IsAPIServerOnly() && !featureflag.APIServerNodes.Enabled() {
-			return nil, fmt.Errorf("apiserver nodes requires the APIServrNodes feature flag to be enabled")
+			return nil, fmt.Errorf("apiserver nodes requires the APIServerNodes feature flag to be enabled")
 		}
 		if ig.Spec.MachineType == "" {
 			ig.Spec.MachineType, err = defaultMachineType(cloud, cluster, ig)
@@ -272,15 +272,19 @@ func MachineArchitecture(cloud fi.Cloud, machineType string) (architectures.Arch
 		if info.ProcessorInfo == nil || len(info.ProcessorInfo.SupportedArchitectures) == 0 {
 			return "", fmt.Errorf("error finding architecture info for instance type %q", machineType)
 		}
-		arch := fi.StringValue(info.ProcessorInfo.SupportedArchitectures[0])
-		switch arch {
-		case ec2.ArchitectureTypeX8664:
-			return architectures.ArchitectureAmd64, nil
-		case ec2.ArchitectureTypeArm64:
-			return architectures.ArchitectureArm64, nil
-		default:
-			return "", fmt.Errorf("unsupported architecture for instance type %q: %s", machineType, arch)
+		var unsupported []string
+		for _, arch := range info.ProcessorInfo.SupportedArchitectures {
+			// Return the first found supported architecture, in order of popularity
+			switch fi.StringValue(arch) {
+			case ec2.ArchitectureTypeX8664:
+				return architectures.ArchitectureAmd64, nil
+			case ec2.ArchitectureTypeArm64:
+				return architectures.ArchitectureArm64, nil
+			default:
+				unsupported = append(unsupported, fi.StringValue(arch))
+			}
 		}
+		return "", fmt.Errorf("unsupported architecture for instance type %q: %v", machineType, unsupported)
 	default:
 		// No other clouds are known to support any other architectures at this time
 		return architectures.ArchitectureAmd64, nil

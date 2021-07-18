@@ -68,21 +68,24 @@ contents:
     CA:
       task:
         Name: kube-scheduler
-        signer: ca
+        keypairID: "3"
+        signer: kubernetes-ca
         subject:
           CommonName: system:kube-scheduler
         type: client
     Cert:
       task:
         Name: kube-scheduler
-        signer: ca
+        keypairID: "3"
+        signer: kubernetes-ca
         subject:
           CommonName: system:kube-scheduler
         type: client
     Key:
       task:
         Name: kube-scheduler
-        signer: ca
+        keypairID: "3"
+        signer: kubernetes-ca
         subject:
           CommonName: system:kube-scheduler
         type: client
@@ -99,7 +102,8 @@ path: /var/log/kube-scheduler.log
 type: file
 ---
 Name: kube-scheduler
-signer: ca
+keypairID: "3"
+signer: kubernetes-ca
 subject:
   CommonName: system:kube-scheduler
 type: client
@@ -107,21 +111,24 @@ type: client
 CA:
   task:
     Name: kube-scheduler
-    signer: ca
+    keypairID: "3"
+    signer: kubernetes-ca
     subject:
       CommonName: system:kube-scheduler
     type: client
 Cert:
   task:
     Name: kube-scheduler
-    signer: ca
+    keypairID: "3"
+    signer: kubernetes-ca
     subject:
       CommonName: system:kube-scheduler
     type: client
 Key:
   task:
     Name: kube-scheduler
-    signer: ca
+    keypairID: "3"
+    signer: kubernetes-ca
     subject:
       CommonName: system:kube-scheduler
     type: client

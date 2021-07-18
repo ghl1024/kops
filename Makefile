@@ -20,7 +20,7 @@ UPLOAD_DEST?=$(S3_BUCKET)
 GCS_LOCATION?=gs://must-override
 GCS_URL=$(GCS_LOCATION:gs://%=https://storage.googleapis.com/%)
 LATEST_FILE?=latest-ci.txt
-GOPATH_1ST:=$(shell go env | grep GOPATH | cut -f 2 -d \")
+GOPATH_1ST:=$(shell go env | grep GOPATH | cut -f 2 -d '"' | sed 's/ /\\ /g')
 UNIQUE:=$(shell date +%s)
 BUILD=$(KOPS_ROOT)/.build
 LOCAL=$(BUILD)/local
@@ -64,13 +64,13 @@ GITSHA := $(shell cd ${KOPS_ROOT}; git describe --always)
 # We lock the versions of our controllers also
 # We need to keep in sync with:
 #   upup/models/cloudup/resources/addons/dns-controller/
-DNS_CONTROLLER_TAG=1.21.0-alpha.3
+DNS_CONTROLLER_TAG=1.22.0-alpha.2
 DNS_CONTROLLER_PUSH_TAG=$(shell tools/get_workspace_status.sh | grep STABLE_DNS_CONTROLLER_TAG | awk '{print $$2}')
 #   upup/models/cloudup/resources/addons/kops-controller.addons.k8s.io/
-KOPS_CONTROLLER_TAG=1.21.0-alpha.3
+KOPS_CONTROLLER_TAG=1.22.0-alpha.2
 KOPS_CONTROLLER_PUSH_TAG=$(shell tools/get_workspace_status.sh | grep STABLE_KOPS_CONTROLLER_TAG | awk '{print $$2}')
 #   pkg/model/components/kubeapiserver/model.go
-KUBE_APISERVER_HEALTHCHECK_TAG=1.21.0-alpha.3
+KUBE_APISERVER_HEALTHCHECK_TAG=1.22.0-alpha.2
 KUBE_APISERVER_HEALTHCHECK_PUSH_TAG=$(shell tools/get_workspace_status.sh | grep STABLE_KUBE_APISERVER_HEALTHCHECK_TAG | awk '{print $$2}')
 
 
@@ -150,9 +150,19 @@ ${KOPS}:
 
 .PHONY: codegen
 codegen:
-	go install k8s.io/kops/upup/tools/generators/...
-	${GOPATH_1ST}/bin/fitask --input-dirs k8s.io/kops/upup/pkg/fi/... \
-	    --go-header-file "hack/boilerplate/boilerplate.generatego.txt"
+	go build -o ${KOPS_ROOT}/_output/bin k8s.io/kops/upup/tools/generators/...
+	${KOPS_ROOT}/_output/bin/fitask \
+		--input-dirs k8s.io/kops/upup/pkg/fi/... \
+		--go-header-file hack/boilerplate/boilerplate.generatego.txt \
+		--output-base ${KOPS_ROOT}
+
+.PHONY: verify-codegen
+verify-codegen:
+	go build -o ${KOPS_ROOT}/_output/bin k8s.io/kops/upup/tools/generators/...
+	${KOPS_ROOT}/_output/bin/fitask --verify-only \
+		--input-dirs k8s.io/kops/upup/pkg/fi/... \
+		--go-header-file hack/boilerplate/boilerplate.generatego.txt \
+		--output-base ${KOPS_ROOT}
 
 .PHONY: protobuf
 protobuf:
@@ -194,6 +204,11 @@ ${DIST}/darwin/amd64/kops:
 	mkdir -p ${DIST}
 	GOOS=darwin GOARCH=amd64 go build ${GCFLAGS} -a ${EXTRA_BUILDFLAGS} -o $@ ${LDFLAGS}"${EXTRA_LDFLAGS} -X k8s.io/kops.Version=${VERSION} -X k8s.io/kops.GitVersion=${GITSHA}" k8s.io/kops/cmd/kops
 
+.PHONY: ${DIST}/darwin/arm64/kops
+${DIST}/darwin/arm64/kops:
+	mkdir -p ${DIST}
+	GOOS=darwin GOARCH=arm64 go build ${GCFLAGS} -a ${EXTRA_BUILDFLAGS} -o $@ ${LDFLAGS}"${EXTRA_LDFLAGS} -X k8s.io/kops.Version=${VERSION} -X k8s.io/kops.GitVersion=${GITSHA}" k8s.io/kops/cmd/kops
+
 .PHONY: ${DIST}/linux/amd64/kops
 ${DIST}/linux/amd64/kops:
 	mkdir -p ${DIST}
@@ -210,7 +225,7 @@ ${DIST}/windows/amd64/kops.exe:
 	GOOS=windows GOARCH=amd64 go build ${GCFLAGS} -a ${EXTRA_BUILDFLAGS} -o $@ ${LDFLAGS}"${EXTRA_LDFLAGS} -X k8s.io/kops.Version=${VERSION} -X k8s.io/kops.GitVersion=${GITSHA}" k8s.io/kops/cmd/kops
 
 .PHONY: crossbuild
-crossbuild: ${DIST}/windows/amd64/kops.exe ${DIST}/darwin/amd64/kops ${DIST}/linux/amd64/kops ${DIST}/linux/arm64/kops
+crossbuild: ${DIST}/windows/amd64/kops.exe ${DIST}/darwin/amd64/kops ${DIST}/darwin/arm64/kops ${DIST}/linux/amd64/kops ${DIST}/linux/arm64/kops
 
 .PHONY: upload
 upload: bazel-version-dist # Upload kops to S3
@@ -283,7 +298,7 @@ gcs-publish-ci: bazel-version-ci
 gen-cli-docs: ${KOPS} # Regenerate CLI docs
 	KOPS_STATE_STORE= \
 	KOPS_FEATURE_FLAGS= \
-	${KOPS} genhelpdocs --out docs/cli
+	${KOPS} gen-cli-docs --out docs/cli
 
 .PHONY: push-amd64
 push-amd64: crossbuild-nodeup-amd64
@@ -372,7 +387,7 @@ gomod: bazelisk gomod-prereqs
 	go mod vendor
 	# Switch weavemesh to use peer_name_hash - bazel rule-go doesn't support build tags yet
 	rm vendor/github.com/weaveworks/mesh/peer_name_mac.go
-	sed -i -e 's/peer_name_hash/!peer_name_mac/g' vendor/github.com/weaveworks/mesh/peer_name_hash.go
+	sed -i.bak -e 's/peer_name_hash/!peer_name_mac/g' vendor/github.com/weaveworks/mesh/peer_name_hash.go
 	# Remove all bazel build files that were vendored and regenerate (we assume they are go-gettable)
 	find vendor/ -name "BUILD" -delete
 	find vendor/ -name "BUILD.bazel" -delete
@@ -424,7 +439,7 @@ verify-misspelling:
 .PHONY: verify-gendocs
 verify-gendocs: ${KOPS}
 	@TMP_DOCS="$$(mktemp -d)"; \
-	'${KOPS}' genhelpdocs --out "$$TMP_DOCS"; \
+	'${KOPS}' gen-cli-docs --out "$$TMP_DOCS"; \
 	\
 	if ! diff -r "$$TMP_DOCS" '${KOPS_ROOT}/docs/cli'; then \
 	     echo "FAIL: make verify-gendocs failed, as the generated markdown docs are out of date." 1>&2; \
@@ -460,13 +475,13 @@ verify-hashes:
 # ci target is for developers, it aims to cover all the CI jobs
 # verify-gendocs will call kops target
 .PHONY: ci
-ci: govet verify-gofmt verify-crds verify-gomod verify-goimports verify-boilerplate verify-bazel verify-misspelling verify-shellcheck verify-staticcheck verify-terraform nodeup examples test | verify-gendocs verify-apimachinery
+ci: govet verify-gofmt verify-crds verify-gomod verify-goimports verify-boilerplate verify-bazel verify-versions verify-misspelling verify-shellcheck verify-staticcheck verify-terraform nodeup examples test | verify-gendocs verify-apimachinery verify-codegen
 	echo "Done!"
 
 # we skip tasks that rely on bazel and are covered by other jobs
 # verify-gofmt: uses bazel, covered by pull-kops-verify
 .PHONY: quick-ci
-quick-ci: verify-crds verify-goimports govet verify-boilerplate verify-bazel verify-misspelling verify-shellcheck | verify-gendocs verify-apimachinery
+quick-ci: verify-crds verify-goimports govet verify-boilerplate verify-bazel verify-versions verify-misspelling verify-shellcheck | verify-gendocs verify-apimachinery verify-codegen
 	echo "Done!"
 
 .PHONY: pr
@@ -539,6 +554,10 @@ verify-generate: verify-crds
 verify-crds:
 	hack/verify-crds.sh
 
+.PHONY: verify-versions
+verify-versions:
+	hack/verify-versions.sh
+
 # -----------------------------------------------------
 # bazel targets
 
@@ -558,6 +577,10 @@ bazel-build-cli: bazelisk
 bazel-build-kops-darwin-amd64:
 	${BAZEL_BIN} ${BAZEL_OPTIONS} build ${BAZEL_CONFIG} --@io_bazel_rules_go//go/config:pure --platforms=@io_bazel_rules_go//go/toolchain:darwin_amd64 //cmd/kops/...
 
+.PHONY: bazel-build-kops-darwin-arm64
+bazel-build-kops-darwin-arm64:
+	${BAZEL_BIN} ${BAZEL_OPTIONS} build ${BAZEL_CONFIG} --@io_bazel_rules_go//go/config:pure --platforms=@io_bazel_rules_go//go/toolchain:darwin_arm64 //cmd/kops/...
+
 .PHONY: bazel-build-kops-linux-amd64
 bazel-build-kops-linux-amd64:
 	${BAZEL_BIN} ${BAZEL_OPTIONS} build ${BAZEL_CONFIG} --@io_bazel_rules_go//go/config:pure --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 //cmd/kops/...
@@ -571,7 +594,7 @@ bazel-build-kops-windows-amd64:
 	${BAZEL_BIN} ${BAZEL_OPTIONS} build ${BAZEL_CONFIG} --@io_bazel_rules_go//go/config:pure --platforms=@io_bazel_rules_go//go/toolchain:windows_amd64 //cmd/kops/...
 
 .PHONY: bazel-crossbuild-kops
-bazel-crossbuild-kops: bazel-build-kops-darwin-amd64 bazel-build-kops-linux-amd64 bazel-build-kops-linux-arm64 bazel-build-kops-windows-amd64
+bazel-crossbuild-kops: bazel-build-kops-darwin-amd64 bazel-build-kops-darwin-arm64 bazel-build-kops-linux-amd64 bazel-build-kops-linux-arm64 bazel-build-kops-windows-amd64
 	echo "Done cross-building kops"
 
 .PHONY: bazel-build-nodeup-linux-amd64
@@ -716,11 +739,12 @@ bazel-version-dist-linux-arm64: bazelisk bazel-build-kops-linux-arm64 bazel-buil
 	echo "Done building dist for arm64"
 
 .PHONY: bazel-version-dist
-bazel-version-dist: bazel-version-dist-linux-amd64 bazel-version-dist-linux-arm64 bazel-build-kops-darwin-amd64 bazel-build-kops-windows-amd64
+bazel-version-dist: bazel-version-dist-linux-amd64 bazel-version-dist-linux-arm64 bazel-build-kops-darwin-amd64 bazel-build-kops-darwin-arm64 bazel-build-kops-windows-amd64
 	rm -rf ${BAZELUPLOAD}
 	mkdir -p ${BAZELUPLOAD}/kops/${VERSION}/linux/amd64/
 	mkdir -p ${BAZELUPLOAD}/kops/${VERSION}/linux/arm64/
 	mkdir -p ${BAZELUPLOAD}/kops/${VERSION}/darwin/amd64/
+	mkdir -p ${BAZELUPLOAD}/kops/${VERSION}/darwin/arm64/
 	mkdir -p ${BAZELUPLOAD}/kops/${VERSION}/windows/amd64/
 	mkdir -p ${BAZELUPLOAD}/kops/${VERSION}/images/
 	cp bazel-bin/cmd/nodeup/linux-amd64/nodeup ${BAZELUPLOAD}/kops/${VERSION}/linux/amd64/nodeup
@@ -753,8 +777,12 @@ bazel-version-dist: bazel-version-dist-linux-amd64 bazel-version-dist-linux-arm6
 	tools/sha256 ${BAZELUPLOAD}/kops/${VERSION}/linux/arm64/kops ${BAZELUPLOAD}/kops/${VERSION}/linux/arm64/kops.sha256
 	cp bazel-bin/cmd/kops/darwin-amd64/kops ${BAZELUPLOAD}/kops/${VERSION}/darwin/amd64/kops
 	tools/sha256 ${BAZELUPLOAD}/kops/${VERSION}/darwin/amd64/kops ${BAZELUPLOAD}/kops/${VERSION}/darwin/amd64/kops.sha256
+	cp bazel-bin/cmd/kops/darwin-arm64/kops ${BAZELUPLOAD}/kops/${VERSION}/darwin/arm64/kops
+	tools/sha256 ${BAZELUPLOAD}/kops/${VERSION}/darwin/arm64/kops ${BAZELUPLOAD}/kops/${VERSION}/darwin/arm64/kops.sha256
 	cp bazel-bin/cmd/kops/windows-amd64/kops ${BAZELUPLOAD}/kops/${VERSION}/windows/amd64/kops.exe
 	tools/sha256 ${BAZELUPLOAD}/kops/${VERSION}/windows/amd64/kops.exe ${BAZELUPLOAD}/kops/${VERSION}/windows/amd64/kops.exe.sha256
+	tar cfvz ${BAZELUPLOAD}/kops/${VERSION}/images/images.tar.gz -C ${BAZELIMAGES} --exclude "*.sha256" .
+	tools/sha256 ${BAZELUPLOAD}/kops/${VERSION}/images/images.tar.gz ${BAZELUPLOAD}/kops/${VERSION}/images/images.tar.gz.sha256
 	cp -fr ${BAZELUPLOAD}/kops/${VERSION}/* ${BAZELDIST}/
 
 .PHONY: bazel-upload

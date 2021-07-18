@@ -17,6 +17,7 @@ limitations under the License.
 package gcetasks
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sort"
@@ -30,10 +31,15 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
-// terraform 0.12 with google cloud provider 3.2 will complain if the length of the name_prefix is more than 32
-const InstanceTemplateNamePrefixMaxLength = 32
+const (
+	// terraform 0.12 with google cloud provider 3.2 will complain if the length of the name_prefix is more than 32
+	InstanceTemplateNamePrefixMaxLength = 32
+
+	accessConfigOneToOneNAT = "ONE_TO_ONE_NAT"
+)
 
 // InstanceTemplate represents a GCE InstanceTemplate
 // +kops:fitask
@@ -43,7 +49,7 @@ type InstanceTemplate struct {
 	// NamePrefix is used as the prefix for the names; we add a timestamp.  Max = InstanceTemplateNamePrefixMaxLength
 	NamePrefix *string
 
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	Network *Network
 	Tags    []string
@@ -64,6 +70,9 @@ type InstanceTemplate struct {
 	Metadata    map[string]fi.Resource
 	MachineType *string
 
+	// HasExternalIP is set to true when an external IP is allocated to an instance.
+	HasExternalIP *bool
+
 	// ID is the actual name
 	ID *string
 }
@@ -78,7 +87,7 @@ func (e *InstanceTemplate) CompareWithID() *string {
 func (e *InstanceTemplate) Find(c *fi.Context) (*InstanceTemplate, error) {
 	cloud := c.Cloud.(gce.GCECloud)
 
-	response, err := cloud.Compute().InstanceTemplates.List(cloud.Project()).Do()
+	templates, err := cloud.Compute().InstanceTemplates().List(context.Background(), cloud.Project())
 	if err != nil {
 		if gce.IsNotFound(err) {
 			return nil, nil
@@ -91,7 +100,7 @@ func (e *InstanceTemplate) Find(c *fi.Context) (*InstanceTemplate, error) {
 		return nil, err
 	}
 
-	for _, r := range response.Items {
+	for _, r := range templates {
 		if !strings.HasPrefix(r.Name, fi.StringValue(e.NamePrefix)+"-") {
 			continue
 		}
@@ -132,6 +141,19 @@ func (e *InstanceTemplate) Find(c *fi.Context) (*InstanceTemplate, error) {
 
 			if ni.Subnetwork != "" {
 				actual.Subnet = &Subnet{Name: fi.String(lastComponent(ni.Subnetwork))}
+			}
+
+			acs := ni.AccessConfigs
+			if len(acs) > 0 {
+				if len(acs) != 1 {
+					return nil, fmt.Errorf("unexpected number of access configs in template %q: %d", *actual.Name, len(acs))
+				}
+				if acs[0].Type != accessConfigOneToOneNAT {
+					return nil, fmt.Errorf("unexpected access type in template %q: %s", *actual.Name, acs[0].Type)
+				}
+				actual.HasExternalIP = fi.Bool(true)
+			} else {
+				actual.HasExternalIP = fi.Bool(false)
 			}
 		}
 
@@ -248,15 +270,19 @@ func (e *InstanceTemplate) mapToGCE(project string, region string) (*compute.Ins
 
 	var networkInterfaces []*compute.NetworkInterface
 	ni := &compute.NetworkInterface{
-		Kind: "compute#networkInterface",
-		AccessConfigs: []*compute.AccessConfig{{
-			Kind: "compute#accessConfig",
-			//NatIP: *e.IPAddress.Address,
-			Type:        "ONE_TO_ONE_NAT",
-			NetworkTier: "PREMIUM",
-		}},
+		Kind:    "compute#networkInterface",
 		Network: e.Network.URL(project),
 	}
+	if fi.BoolValue(e.HasExternalIP) {
+		ni.AccessConfigs = []*compute.AccessConfig{
+			{
+				Kind:        "compute#accessConfig",
+				Type:        accessConfigOneToOneNAT,
+				NetworkTier: "PREMIUM",
+			},
+		}
+	}
+
 	if e.Subnet != nil {
 		ni.Subnetwork = e.Subnet.URL(project, region)
 	}
@@ -284,17 +310,17 @@ func (e *InstanceTemplate) mapToGCE(project string, region string) (*compute.Ins
 		},
 	}
 	// if e.ServiceAccounts != nil {
-	// 	for _, s := range e.ServiceAccounts {
-	// 		serviceAccounts = append(serviceAccounts, &compute.ServiceAccount{
-	// 			Email:  s,
-	// 			Scopes: scopes,
-	// 		})
-	// 	}
+	//	for _, s := range e.ServiceAccounts {
+	//		serviceAccounts = append(serviceAccounts, &compute.ServiceAccount{
+	//			Email:  s,
+	//			Scopes: scopes,
+	//		})
+	//	}
 	// } else {
-	// 	serviceAccounts = append(serviceAccounts, &compute.ServiceAccount{
-	// 		Email:  "default",
-	// 		Scopes: scopes,
-	// 	})
+	//	serviceAccounts = append(serviceAccounts, &compute.ServiceAccount{
+	//		Email:  "default",
+	//		Scopes: scopes,
+	//	})
 	// }
 
 	var metadataItems []*compute.MetadataItems
@@ -405,7 +431,7 @@ func (_ *InstanceTemplate) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Instanc
 		e.ID = &name
 		i.Name = name
 
-		op, err := t.Cloud.Compute().InstanceTemplates.Insert(t.Cloud.Project(), i).Do()
+		op, err := t.Cloud.Compute().InstanceTemplates().Insert(t.Cloud.Project(), i)
 		if err != nil {
 			return fmt.Errorf("error creating InstanceTemplate: %v", err)
 		}
@@ -428,8 +454,8 @@ type terraformInstanceTemplate struct {
 	Scheduling            *terraformScheduling                     `json:"scheduling,omitempty" cty:"scheduling"`
 	Disks                 []*terraformInstanceTemplateAttachedDisk `json:"disk,omitempty" cty:"disk"`
 	NetworkInterfaces     []*terraformNetworkInterface             `json:"network_interface,omitempty" cty:"network_interface"`
-	Metadata              map[string]*terraform.Literal            `json:"metadata,omitempty" cty:"metadata"`
-	MetadataStartupScript *terraform.Literal                       `json:"metadata_startup_script,omitempty" cty:"metadata_startup_script"`
+	Metadata              map[string]*terraformWriter.Literal      `json:"metadata,omitempty" cty:"metadata"`
+	MetadataStartupScript *terraformWriter.Literal                 `json:"metadata_startup_script,omitempty" cty:"metadata_startup_script"`
 	Tags                  []string                                 `json:"tags,omitempty" cty:"tags"`
 }
 
@@ -461,13 +487,13 @@ type terraformInstanceTemplateAttachedDisk struct {
 }
 
 type terraformNetworkInterface struct {
-	Network      *terraform.Literal       `json:"network,omitempty" cty:"network"`
-	Subnetwork   *terraform.Literal       `json:"subnetwork,omitempty" cty:"subnetwork"`
+	Network      *terraformWriter.Literal `json:"network,omitempty" cty:"network"`
+	Subnetwork   *terraformWriter.Literal `json:"subnetwork,omitempty" cty:"subnetwork"`
 	AccessConfig []*terraformAccessConfig `json:"access_config" cty:"access_config"`
 }
 
 type terraformAccessConfig struct {
-	NatIP *terraform.Literal `json:"nat_ip,omitempty" cty:"nat_ip"`
+	NatIP *terraformWriter.Literal `json:"nat_ip,omitempty" cty:"nat_ip"`
 }
 
 func addNetworks(network *Network, subnet *Subnet, networkInterfaces []*compute.NetworkInterface) []*terraformNetworkInterface {
@@ -484,7 +510,7 @@ func addNetworks(network *Network, subnet *Subnet, networkInterfaces []*compute.
 			tac := &terraformAccessConfig{}
 			natIP := gac.NatIP
 			if natIP != "" {
-				tac.NatIP = terraform.LiteralFromStringValue(natIP)
+				tac.NatIP = terraformWriter.LiteralFromStringValue(natIP)
 			}
 
 			tf.AccessConfig = append(tf.AccessConfig, tac)
@@ -495,22 +521,21 @@ func addNetworks(network *Network, subnet *Subnet, networkInterfaces []*compute.
 	return ni
 }
 
-func addMetadata(target *terraform.TerraformTarget, name string, metadata *compute.Metadata) (map[string]*terraform.Literal, error) {
+func addMetadata(target *terraform.TerraformTarget, name string, metadata *compute.Metadata) (map[string]*terraformWriter.Literal, error) {
 	if metadata == nil {
 		return nil, nil
 	}
-	m := make(map[string]*terraform.Literal)
+	m := make(map[string]*terraformWriter.Literal)
 	for _, g := range metadata.Items {
 		val := fi.StringValue(g.Value)
 		if strings.Contains(val, "\n") {
-			v := fi.NewStringResource(val)
-			tfResource, err := target.AddFile("google_compute_instance_template", name, "metadata_"+g.Key, v, false)
+			tfResource, err := target.AddFileBytes("google_compute_instance_template", name, "metadata_"+g.Key, []byte(val), false)
 			if err != nil {
 				return nil, err
 			}
 			m[g.Key] = tfResource
 		} else {
-			m[g.Key] = terraform.LiteralFromStringValue(val)
+			m[g.Key] = terraformWriter.LiteralFromStringValue(val)
 		}
 	}
 	return m, nil
@@ -529,7 +554,7 @@ func addServiceAccounts(serviceAccounts []*compute.ServiceAccount) *terraformSer
 		Scopes: csa.Scopes,
 	}
 	// for _, scope := range csa.Scopes {
-	// 	tsa.Scopes = append(tsa.Scopes, scope)
+	//	tsa.Scopes = append(tsa.Scopes, scope)
 	// }
 	return tsa
 }
@@ -590,6 +615,6 @@ func (_ *InstanceTemplate) RenderTerraform(t *terraform.TerraformTarget, a, e, c
 	return t.RenderResource("google_compute_instance_template", name, tf)
 }
 
-func (i *InstanceTemplate) TerraformLink() *terraform.Literal {
-	return terraform.LiteralSelfLink("google_compute_instance_template", *i.Name)
+func (i *InstanceTemplate) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralSelfLink("google_compute_instance_template", *i.Name)
 }

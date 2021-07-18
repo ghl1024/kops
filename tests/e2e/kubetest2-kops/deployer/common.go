@@ -57,13 +57,14 @@ func (d *deployer) initialize() error {
 		}
 	}
 	if d.KopsVersionMarker != "" {
-		binaryPath, baseURL, err := kops.DownloadKops(d.KopsVersionMarker, d.KopsBinaryPath)
+		d.KopsBinaryPath = path.Join(d.commonOptions.RunDir(), "kops")
+		baseURL, err := kops.DownloadKops(d.KopsVersionMarker, d.KopsBinaryPath)
 		if err != nil {
 			return fmt.Errorf("init failed to download kops from url: %v", err)
 		}
-		d.KopsBinaryPath = binaryPath
 		d.KopsBaseURL = baseURL
 	}
+
 	switch d.CloudProvider {
 	case "aws":
 		// These environment variables are defined by the "preset-aws-ssh" prow preset
@@ -74,6 +75,14 @@ func (d *deployer) initialize() error {
 		if d.SSHPublicKeyPath == "" {
 			d.SSHPublicKeyPath = os.Getenv("AWS_SSH_PUBLIC_KEY_FILE")
 		}
+	case "digitalocean":
+		if d.SSHPrivateKeyPath == "" {
+			d.SSHPrivateKeyPath = os.Getenv("DO_SSH_PRIVATE_KEY_FILE")
+		}
+		if d.SSHPublicKeyPath == "" {
+			d.SSHPublicKeyPath = os.Getenv("DO_SSH_PUBLIC_KEY_FILE")
+		}
+		d.SSHUser = "root"
 	case "gce":
 		if d.GCPProject == "" {
 			klog.V(1).Info("No GCP project provided, acquiring from Boskos")
@@ -105,9 +114,10 @@ func (d *deployer) initialize() error {
 				d.SSHPrivateKeyPath = privateKey
 				d.SSHPublicKeyPath = publicKey
 			}
-			d.createBucket = os.Getenv("KOPS_STATE_STORE") == ""
+			d.createBucket = true
 		}
 	}
+
 	if d.SSHUser == "" {
 		d.SSHUser = os.Getenv("KUBE_SSH_USER")
 	}
@@ -117,6 +127,17 @@ func (d *deployer) initialize() error {
 			return err
 		}
 		d.terraform = t
+	}
+	if d.commonOptions.ShouldTest() {
+		for _, envvar := range d.env() {
+			// Set all of the env vars we use for kops in the current process
+			// so that the tester inherits them when shelling out to kops
+			if i := strings.Index(envvar, "="); i != -1 {
+				os.Setenv(envvar[0:i], envvar[i+1:])
+			} else {
+				os.Setenv(envvar, "")
+			}
+		}
 	}
 	return nil
 }
@@ -128,16 +149,25 @@ func (d *deployer) verifyKopsFlags() error {
 		if err != nil {
 			return err
 		}
-		klog.Info("Using cluster name ", d.ClusterName)
+		klog.Infof("Using cluster name: %v", d.ClusterName)
 		d.ClusterName = name
 	}
 
 	if d.KopsBinaryPath == "" && d.KopsVersionMarker == "" {
-		if ws := os.Getenv("WORKSPACE"); ws != "" {
-			d.KopsBinaryPath = path.Join(ws, "kops")
-		} else {
-			return errors.New("missing required --kops-binary-path when --kops-version-marker is not used")
+		return errors.New("missing required --kops-binary-path when --kops-version-marker is not used")
+	}
+
+	// when we use a binary path, we want to use the corresponding nodeup et.al
+	if d.KopsBinaryPath != "" {
+		baseUrl := os.Getenv("KOPS_BASE_URL")
+		if baseUrl == "" {
+			stageLocation, err := defaultStageLocation(d.KopsRoot)
+			if err != nil {
+				return err
+			}
+			d.KopsBaseURL = strings.Replace(stageLocation, "gs://", "https://storage.googleapis.com/", 1)
 		}
+
 	}
 
 	switch d.CloudProvider {
@@ -167,6 +197,16 @@ func (d *deployer) env() []string {
 			v := os.Getenv(k)
 			if v != "" {
 				vars = append(vars, k+"="+v)
+			}
+		}
+	} else if d.CloudProvider == "digitalocean" {
+		// Pass through some env vars if set
+		for _, k := range []string{"DIGITALOCEAN_ACCESS_TOKEN", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"} {
+			v := os.Getenv(k)
+			if v != "" {
+				vars = append(vars, k+"="+v)
+			} else {
+				klog.Warningf("DO env var %s is empty..", k)
 			}
 		}
 	}
@@ -236,6 +276,8 @@ func (d *deployer) stateStore() string {
 		case "gce":
 			d.createBucket = true
 			ss = "gs://" + gce.GCSBucketName(d.GCPProject)
+		case "digitalocean":
+			ss = "do://e2e-kops-space"
 		}
 	}
 	return ss

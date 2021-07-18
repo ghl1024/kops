@@ -181,7 +181,7 @@ etcdClusters:
 
 The etcd version used by kOps follows the recommended etcd version for the given kubernetes version. It is possible to override this by adding the `version` key to each of the etcd clusters.
 
-By default, the Volumes created for the etcd clusters are `gp2` and 20GB each. The volume size, type and Iops( for `io1`) can be configured via their parameters. Conversion between `gp2` and `io1` is not supported, nor are size changes.
+By default, the Volumes created for the etcd clusters are `gp3` and 20GB each. The volume size, type (`gp2`, `gp3`, `io1`, `io2`), iops( for `io1`, `io2`, `gp3`) and throughput (`gp3`) can be configured via their parameters.
 
 As of kOps 1.12.0 it is also possible to modify the requests for your etcd cluster members using the `cpuRequest` and `memoryRequest` parameters.
 
@@ -190,7 +190,7 @@ etcdClusters:
 - etcdMembers:
   - instanceGroup: master-us-east-1a
     name: a
-    volumeType: gp2
+    volumeType: gp3
     volumeSize: 20
   name: main
 - etcdMembers:
@@ -508,7 +508,7 @@ To prepare the customized client-ca file on master nodes, the user can either us
 
 In the case that the user would use a customized client-ca file, it is common that the kubernetes CA (`/srv/kubernetes/ca/crt`) need to be appended to the end of the client-ca file. One way to append the ca.crt to the end of the customized client-ca file is to write an [kop-hook](https://kops.sigs.k8s.io/cluster_spec/#hooks) to do the append logic.
 
-Kops will have [CA rotation](https://kops.sigs.k8s.io/rotate-secrets/) feature soon, which would refresh the kubernetes cert files, including the ca.crt. If a customized client-ca file is used, when kops cert rotation happens, the user is responsible to update the ca.crt in the customized client-ca file. The refresh ca.crt logic can also be achieved by writing a kops hook.
+Kops has a [CA rotation](operations/rotate-secrets.md) feature, which refreshes the Kubernetes certificate files, including the ca.crt. If a customized client-ca file is used, when kOps cert rotation happens, the user is responsible for updating the ca.crt in the customized client-ca file. The refresh ca.crt logic can also be achieved by writing a kops hook.
 
 See also [Kubernetes certificates](https://kubernetes.io/docs/concepts/cluster-administration/certificates/)
 
@@ -552,6 +552,16 @@ spec:
   kubeAPIServer:
     defaultNotReadyTolerationSeconds: 600
     defaultUnreachableTolerationSeconds: 600
+```
+
+### LogFormat
+
+Choose between log format. Permitted formats: "json", "text". Default: "text".
+
+```yaml
+spec:
+  kubeAPIServer:
+    logFormat: json
 ```
 
 ## externalDns
@@ -676,6 +686,18 @@ spec:
     housekeepingInterval: 30s
 ```
 
+### Pod PIDs Limit
+{{ kops_feature_table(kops_added_default='1.22', k8s_min='1.20') }}
+
+`podPidsLimit` allows to configure the maximum number of pids (process ids) in any pod.
+[Read more](https://kubernetes.io/docs/concepts/policy/pid-limiting/) in Kubernetes documentation.
+
+```yaml
+spec:
+  kubelet:
+    podPidsLimit: 1024
+```
+
 ### Event QPS
 {{ kops_feature_table(kops_added_default='1.19') }}
 
@@ -698,6 +720,16 @@ spec:
     eventBurst: 10
 ```
 
+### LogFormat
+
+Choose between log format. Permitted formats: "json", "text". Default: "text".
+
+```yaml
+spec:
+  kubelet:
+    logFormat: json
+```
+
 ## kubeScheduler
 
 This block contains configurations for `kube-scheduler`.  See https://kubernetes.io/docs/admin/kube-scheduler/
@@ -712,6 +744,16 @@ spec:
 Will make kube-scheduler use the scheduler policy from configmap "scheduler-policy" in namespace kube-system.
 
 Note that as of Kubernetes 1.8.0 kube-scheduler does not reload its configuration from configmap automatically. You will need to ssh into the master instance and restart the Docker container manually.
+
+### LogFormat
+
+Choose between log format. Permitted formats: "json", "text". Default: "text".
+
+```yaml
+spec:
+  kubeScheduler:
+    logFormat: json
+```
 
 ## kubeDNS
 
@@ -795,6 +837,16 @@ spec:
 
 For more details on `horizontalPodAutoscaler` flags see the [official HPA docs](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/) and the [kOps guides on how to set it up](horizontal_pod_autoscaling.md).
 
+### LogFormat
+
+Choose between log format. Permitted formats: "json", "text". Default: "text".
+
+```yaml
+spec:
+  kubeControllerManager:
+    logFormat: json
+```
+
 ##  Feature Gates
 
 Feature gates can be configured on the kubelet.
@@ -863,7 +915,7 @@ More information about running in an existing VPC is [here](run_in_existing_vpc.
 
 ## hooks
 
-Hooks allow for the execution of an action before the installation of Kubernetes on every node in a cluster. For instance you can install Nvidia drivers for using GPUs. This hooks can be in the form of Docker images or manifest files (systemd units). Hooks can be placed in either the cluster spec, meaning they will be globally deployed, or they can be placed into the instanceGroup specification. Note: service names on the instanceGroup which overlap with the cluster spec take precedence and ignore the cluster spec definition, i.e. if you have a unit file 'myunit.service' in cluster and then one in the instanceGroup, only the instanceGroup is applied.
+Hooks allow for the execution of an action before the installation of Kubernetes on every node in a cluster. For instance you can install Nvidia drivers for using GPUs. This hooks can be in the form of container images or manifest files (systemd units). Hooks can be placed in either the cluster spec, meaning they will be globally deployed, or they can be placed into the instanceGroup specification. Note: service names on the instanceGroup which overlap with the cluster spec take precedence and ignore the cluster spec definition, i.e. if you have a unit file 'myunit.service' in cluster and then one in the instanceGroup, only the instanceGroup is applied.
 
 When creating a systemd unit hook using the `manifest` field, the hook system will construct a systemd unit file for you. It creates the `[Unit]` section, adding an automated description and setting `Before` and `Requires` values based on the `before` and `requires` fields. The value of the `manifest` field is used as the `[Service]` section of the unit file. To override this behavior, and instead specify the entire unit file yourself, you may specify `useRawManifest: true`. In this case, the contents of the `manifest` field will be used as a systemd unit, unmodified. The `before` and `requires` fields may not be used together with `useRawManifest`.
 
@@ -1304,3 +1356,50 @@ spec:
     managed: false
 ```
 
+## Service Account Issuer Discovery and AWS IAM Roles for Service Accounts (IRSA)
+
+{{ kops_feature_table(kops_added_default='1.21') }}
+
+kOps can publish the Kubernetes service account token issuer and configure AWS to trust it
+to authenticate Kubernetes service accounts:
+
+```yaml
+spec:
+  serviceAccountIssuerDiscovery:
+    discoveryStore: s3://publicly-readable-store
+    enableAWSOIDCProvider: true
+```
+
+The `discoveryStore` option causes kOps to publish an OIDC-compatible discovery document
+to a path in an S3 bucket. This would ordinarily be a different bucket than the state store.
+kOps will automatically configure `spec.kubeAPIServer.serviceAccountIssuer` and default
+`spec.kubeAPIServer.serviceAccountJWKSURI` to the corresponding
+HTTPS URL.
+
+The `enableAWSOIDCProvider` configures AWS to trust the service account issuer to
+authenticate service accounts for IAM Roles for Service Accounts (IRSA). In order for this to work,
+the service account issuer discovery URL must be publicly readable.
+
+kOps can provision AWS permissions for use by service accounts:
+
+```yaml
+spec:
+  iam:
+    serviceAccountExternalPermissions:
+      - name: someServiceAccount
+        namespace: someNamespace
+        aws:
+          policyARNs:
+            - arn:aws:iam::000000000000:policy/somePolicy
+      - name: anotherServiceAccount
+        namespace: anotherNamespace
+        aws:
+          inlinePolicy: |-
+            [
+              {
+                "Effect": "Allow",
+                "Action": "s3:ListAllMyBuckets",
+                "Resource": "*"
+              }
+            ]
+```

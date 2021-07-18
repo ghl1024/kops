@@ -25,9 +25,12 @@ import (
 	"k8s.io/klog/v2"
 	addonsapi "k8s.io/kops/channels/pkg/api"
 	"k8s.io/kops/pkg/assets"
+	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/pkg/kubemanifest"
 	"k8s.io/kops/pkg/model"
+	"k8s.io/kops/pkg/model/components/addonmanifests/awsebscsidriver"
 	"k8s.io/kops/pkg/model/components/addonmanifests/awsloadbalancercontroller"
+	"k8s.io/kops/pkg/model/components/addonmanifests/clusterautoscaler"
 	"k8s.io/kops/pkg/model/components/addonmanifests/dnscontroller"
 	"k8s.io/kops/pkg/model/iam"
 	"k8s.io/kops/upup/pkg/fi"
@@ -78,6 +81,10 @@ func RemapAddonManifest(addon *addonsapi.AddonSpec, context *model.KopsModelCont
 }
 
 func addServiceAccountRole(context *model.KopsModelContext, objects kubemanifest.ObjectList) error {
+	if !featureflag.UseServiceAccountIAM.Enabled() {
+		return nil
+	}
+
 	for _, object := range objects {
 		if object.Kind() != "Deployment" {
 			continue
@@ -90,18 +97,16 @@ func addServiceAccountRole(context *model.KopsModelContext, objects kubemanifest
 		if err := object.Reparse(podSpec, "spec", "template", "spec"); err != nil {
 			return fmt.Errorf("failed to parse spec.template.spec from Deployment: %v", err)
 		}
-		containers := podSpec.Containers
 		sa := podSpec.ServiceAccountName
 		subject := getWellknownServiceAccount(sa)
 		if subject == nil {
 			continue
 		}
-		for k, container := range containers {
-			if err := iam.AddServiceAccountRole(&context.IAMModelContext, podSpec, &container, subject); err != nil {
-				return err
-			}
-			containers[k] = container
+
+		if err := iam.AddServiceAccountRole(&context.IAMModelContext, podSpec, subject); err != nil {
+			return err
 		}
+
 		if err := object.Set(podSpec, "spec", "template", "spec"); err != nil {
 			return fmt.Errorf("failed to set object: %w", err)
 		}
@@ -114,6 +119,10 @@ func getWellknownServiceAccount(name string) iam.Subject {
 	switch name {
 	case "aws-load-balancer-controller":
 		return &awsloadbalancercontroller.ServiceAccount{}
+	case "cluster-autoscaler":
+		return &clusterautoscaler.ServiceAccount{}
+	case "ebs-csi-controller-sa":
+		return &awsebscsidriver.ServiceAccount{}
 	default:
 		return nil
 	}
@@ -134,7 +143,6 @@ func addLabels(addon *addonsapi.AddonSpec, objects kubemanifest.ObjectList) erro
 
 		meta.Labels["app.kubernetes.io/managed-by"] = "kops"
 		meta.Labels["addon.kops.k8s.io/name"] = *addon.Name
-		meta.Labels["addon.kops.k8s.io/version"] = *addon.Version
 
 		// ensure selector is set where applicable
 		for key, val := range addon.Selector {

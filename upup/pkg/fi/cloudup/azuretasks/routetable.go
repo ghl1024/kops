@@ -26,12 +26,11 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/azure"
 )
 
-//go:generate fitask -type=RouteTable
-
 // RouteTable is an Azure Route Table.
+// +kops:fitask
 type RouteTable struct {
 	Name          *string
-	Lifecycle     *fi.Lifecycle
+	Lifecycle     fi.Lifecycle
 	ResourceGroup *ResourceGroup
 	Tags          map[string]*string
 	Shared        *bool

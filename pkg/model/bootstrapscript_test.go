@@ -17,6 +17,7 @@ limitations under the License.
 package model
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/nodeup"
+	"k8s.io/kops/pkg/model/iam"
 	"k8s.io/kops/pkg/testutils/golden"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/fitasks"
@@ -63,62 +65,63 @@ type nodeupConfigBuilder struct {
 	cluster *kops.Cluster
 }
 
-func (n *nodeupConfigBuilder) BuildConfig(ig *kops.InstanceGroup, apiserverAdditionalIPs []string, ca fi.Resource) (*nodeup.Config, error) {
-	return nodeup.NewConfig(n.cluster, ig), nil
+func (n *nodeupConfigBuilder) BuildConfig(ig *kops.InstanceGroup, apiserverAdditionalIPs []string, caTasks map[string]*fitasks.Keypair) (*nodeup.Config, *nodeup.BootConfig, error) {
+	config, bootConfig := nodeup.NewConfig(n.cluster, ig)
+	return config, bootConfig, nil
 }
 
 func TestBootstrapUserData(t *testing.T) {
 	cs := []struct {
 		Role               kops.InstanceGroupRole
-		ExpectedFilePath   string
+		ExpectedFileIndex  int
 		HookSpecRoles      []kops.InstanceGroupRole
 		FileAssetSpecRoles []kops.InstanceGroupRole
 	}{
 		{
 			Role:               "Master",
-			ExpectedFilePath:   "tests/data/bootstrapscript_0.txt",
+			ExpectedFileIndex:  0,
 			HookSpecRoles:      []kops.InstanceGroupRole{""},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{""},
 		},
 		{
 			Role:               "Master",
-			ExpectedFilePath:   "tests/data/bootstrapscript_0.txt",
+			ExpectedFileIndex:  0,
 			HookSpecRoles:      []kops.InstanceGroupRole{"Node"},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{"Node"},
 		},
 		{
 			Role:               "Master",
-			ExpectedFilePath:   "tests/data/bootstrapscript_1.txt",
+			ExpectedFileIndex:  1,
 			HookSpecRoles:      []kops.InstanceGroupRole{"Master"},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{"Master"},
 		},
 		{
 			Role:               "Master",
-			ExpectedFilePath:   "tests/data/bootstrapscript_2.txt",
+			ExpectedFileIndex:  2,
 			HookSpecRoles:      []kops.InstanceGroupRole{"Master", "Node"},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{"Master", "Node"},
 		},
 		{
 			Role:               "Node",
-			ExpectedFilePath:   "tests/data/bootstrapscript_3.txt",
+			ExpectedFileIndex:  3,
 			HookSpecRoles:      []kops.InstanceGroupRole{""},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{""},
 		},
 		{
 			Role:               "Node",
-			ExpectedFilePath:   "tests/data/bootstrapscript_4.txt",
+			ExpectedFileIndex:  4,
 			HookSpecRoles:      []kops.InstanceGroupRole{"Node"},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{"Node"},
 		},
 		{
 			Role:               "Node",
-			ExpectedFilePath:   "tests/data/bootstrapscript_3.txt",
+			ExpectedFileIndex:  3,
 			HookSpecRoles:      []kops.InstanceGroupRole{"Master"},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{"Master"},
 		},
 		{
 			Role:               "Node",
-			ExpectedFilePath:   "tests/data/bootstrapscript_5.txt",
+			ExpectedFileIndex:  5,
 			HookSpecRoles:      []kops.InstanceGroupRole{"Master", "Node"},
 			FileAssetSpecRoles: []kops.InstanceGroupRole{"Master", "Node"},
 		},
@@ -137,8 +140,28 @@ func TestBootstrapUserData(t *testing.T) {
 			Type:    "ca",
 		}
 		c.AddTask(caTask)
+		for _, keypair := range []string{
+			"apiserver-aggregator-ca",
+			"etcd-clients-ca",
+			"etcd-manager-ca-events",
+			"etcd-manager-ca-main",
+			"etcd-peers-ca-events",
+			"etcd-peers-ca-main",
+			"service-account",
+		} {
+			task := &fitasks.Keypair{
+				Name:    fi.String(keypair),
+				Subject: "cn=" + keypair,
+				Type:    "ca",
+			}
+			c.AddTask(task)
+		}
 
 		bs := &BootstrapScriptBuilder{
+			KopsModelContext: &KopsModelContext{
+				IAMModelContext: iam.IAMModelContext{Cluster: cluster},
+				InstanceGroups:  []*kops.InstanceGroup{group},
+			},
 			NodeUpConfigBuilder: &nodeupConfigBuilder{cluster: cluster},
 			NodeUpAssets: map[architectures.Architecture]*mirrors.MirroredAsset{
 				architectures.ArchitectureAmd64: {
@@ -150,6 +173,7 @@ func TestBootstrapUserData(t *testing.T) {
 					Hash:      hashing.MustFromString("e525c28a65ff0ce4f95f9e730195b4e67fdcb15ceb1f36b5ad6921a8a4490c71"),
 				},
 			},
+			Cluster: cluster,
 		}
 
 		res, err := bs.ResourceNodeUp(c, group)
@@ -168,7 +192,16 @@ func TestBootstrapUserData(t *testing.T) {
 			continue
 		}
 
-		golden.AssertMatchesFile(t, actual, x.ExpectedFilePath)
+		golden.AssertMatchesFile(t, actual, fmt.Sprintf("tests/data/bootstrapscript_%d.txt", x.ExpectedFileIndex))
+
+		require.Contains(t, c.Tasks, "ManagedFile/nodeupconfig-testIG")
+		actual, err = fi.ResourceAsString(c.Tasks["ManagedFile/nodeupconfig-testIG"].(*fitasks.ManagedFile).Contents)
+		if err != nil {
+			t.Errorf("case %d failed to render nodeupconfig resource. error: %s", i, err)
+			continue
+		}
+
+		golden.AssertMatchesFile(t, actual, fmt.Sprintf("tests/data/nodeupconfig_%d.txt", x.ExpectedFileIndex))
 	}
 }
 
@@ -187,7 +220,7 @@ func makeTestCluster(hookSpecRoles []kops.InstanceGroupRole, fileAssetSpecRoles 
 					Members: []kops.EtcdMemberSpec{
 						{
 							Name:          "test",
-							InstanceGroup: s("ig-1"),
+							InstanceGroup: fi.String("ig-1"),
 						},
 					},
 					Version: "3.1.11",
@@ -197,7 +230,7 @@ func makeTestCluster(hookSpecRoles []kops.InstanceGroupRole, fileAssetSpecRoles 
 					Members: []kops.EtcdMemberSpec{
 						{
 							Name:          "test",
-							InstanceGroup: s("ig-1"),
+							InstanceGroup: fi.String("ig-1"),
 						},
 					},
 					Version: "3.1.11",
@@ -206,14 +239,14 @@ func makeTestCluster(hookSpecRoles []kops.InstanceGroupRole, fileAssetSpecRoles 
 			},
 			NetworkCIDR: "10.79.0.0/24",
 			CloudConfig: &kops.CloudConfiguration{
-				NodeTags: s("something"),
+				NodeTags: fi.String("something"),
 			},
 			ContainerRuntime: "docker",
 			Containerd: &kops.ContainerdConfig{
-				LogLevel: s("info"),
+				LogLevel: fi.String("info"),
 			},
 			Docker: &kops.DockerConfig{
-				LogLevel: s("INFO"),
+				LogLevel: fi.String("INFO"),
 			},
 			KubeAPIServer: &kops.KubeAPIServerConfig{
 				Image: "CoreOS",
@@ -245,6 +278,7 @@ func makeTestCluster(hookSpecRoles []kops.InstanceGroupRole, fileAssetSpecRoles 
 					Port: 80,
 				},
 			},
+			Networking: &kops.NetworkingSpec{},
 			Hooks: []kops.HookSpec{
 				{
 					ExecContainer: &kops.ExecContainerAction{

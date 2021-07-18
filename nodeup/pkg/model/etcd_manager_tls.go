@@ -17,10 +17,7 @@ limitations under the License.
 package model
 
 import (
-	"fmt"
-
 	"k8s.io/kops/upup/pkg/fi"
-	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
 )
 
 // EtcdManagerTLSBuilder configures TLS support for etcd-manager
@@ -32,59 +29,32 @@ var _ fi.ModelBuilder = &EtcdManagerTLSBuilder{}
 
 // Build is responsible for TLS configuration for etcd-manager
 func (b *EtcdManagerTLSBuilder) Build(ctx *fi.ModelBuilderContext) error {
-	if !b.HasAPIServer || !b.UseEtcdManager() {
+	if !b.IsMaster || !b.UseEtcdManager() {
 		return nil
 	}
 
-	// We also dynamically generate the client keypair for apiserver
-	if err := b.buildKubeAPIServerKeypair(ctx); err != nil {
-		return err
-	}
+	for _, etcdCluster := range b.Cluster.Spec.EtcdClusters {
+		k := etcdCluster.Name
 
-	for _, k := range []string{"main", "events"} {
 		d := "/etc/kubernetes/pki/etcd-manager-" + k
 
 		keys := make(map[string]string)
 
-		// Only nodes running etcd need the peers CA
-		if b.IsMaster {
-			keys["etcd-manager-ca"] = "etcd-manager-ca-" + k
-			keys["etcd-peers-ca"] = "etcd-peers-ca-" + k
-		}
+		keys["etcd-manager-ca"] = "etcd-manager-ca-" + k
+		keys["etcd-peers-ca"] = "etcd-peers-ca-" + k
+		keys["etcd-clients-ca"] = "etcd-clients-ca-" + k
+
 		// Because API server can only have a single client certificate for etcd, we need to share a client CA
-		keys["etcd-clients-ca"] = "etcd-clients-ca"
+		if k == "main" || k == "events" {
+			keys["etcd-clients-ca"] = "etcd-clients-ca"
+		}
 
 		for fileName, keystoreName := range keys {
-			cert, err := b.KeyStore.FindCert(keystoreName)
-			if err != nil {
-				return err
-			}
-			if cert == nil {
-				return fmt.Errorf("keypair %q not found", keystoreName)
-			}
-
-			if err := b.BuildCertificateTask(ctx, keystoreName, d+"/"+fileName+".crt", nil); err != nil {
-				return err
-			}
-			if err := b.BuildPrivateKeyTask(ctx, keystoreName, d+"/"+fileName+".key", nil); err != nil {
+			if err := b.buildCertificatePairTask(ctx, keystoreName, d, fileName, nil, nil, true); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
-}
-
-func (b *EtcdManagerTLSBuilder) buildKubeAPIServerKeypair(c *fi.ModelBuilderContext) error {
-	name := "etcd-client"
-	issueCert := &nodetasks.IssueCert{
-		Name:   name,
-		Signer: "etcd-clients-ca",
-		Type:   "client",
-		Subject: nodetasks.PKIXName{
-			CommonName: "kube-apiserver",
-		},
-	}
-	c.AddTask(issueCert)
-	return issueCert.AddFileTasks(c, "/etc/kubernetes/pki/kube-apiserver", name, "etcd-ca", nil)
 }

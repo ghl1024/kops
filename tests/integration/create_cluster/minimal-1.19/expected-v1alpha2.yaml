@@ -11,7 +11,6 @@ spec:
   channel: stable
   cloudProvider: aws
   configBase: memfs://tests/minimal.example.com
-  containerRuntime: containerd
   etcdClusters:
   - cpuRequest: 200m
     etcdMembers:
@@ -34,6 +33,7 @@ spec:
     anonymousAuth: false
   kubernetesApiAccess:
   - 0.0.0.0/0
+  - ::/0
   kubernetesVersion: v1.19.0
   masterPublicName: api.minimal.example.com
   networkCIDR: 172.20.0.0/16
@@ -42,6 +42,7 @@ spec:
   nonMasqueradeCIDR: 100.64.0.0/10
   sshAccess:
   - 0.0.0.0/0
+  - ::/0
   subnets:
   - cidr: 172.20.32.0/19
     name: us-test-1a
@@ -63,7 +64,7 @@ metadata:
     kops.k8s.io/cluster: minimal.example.com
   name: master-us-test-1a
 spec:
-  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210325
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210503
   machineType: m3.medium
   maxSize: 1
   minSize: 1
@@ -83,7 +84,7 @@ metadata:
     kops.k8s.io/cluster: minimal.example.com
   name: nodes-us-test-1a
 spec:
-  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210325
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210503
   machineType: t2.medium
   maxSize: 1
   minSize: 1

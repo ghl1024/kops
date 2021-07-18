@@ -28,15 +28,22 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type VPC struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
-	ID                 *string
-	CIDR               *string
+	ID   *string
+	CIDR *string
+
+	// AmazonIPv6 is used only for Terraform rendering.
+	// Direct and CloudFormation rendering is handled via the VPCAmazonIPv6CIDRBlock task
+	AmazonIPv6 *bool
+	IPv6CIDR   *string
+
 	EnableDNSHostnames *bool
 	EnableDNSSupport   *bool
 
@@ -82,13 +89,33 @@ func (e *VPC) Find(c *fi.Context) (*VPC, error) {
 	}
 	vpc := response.Vpcs[0]
 	actual := &VPC{
-		ID:   vpc.VpcId,
-		CIDR: vpc.CidrBlock,
-		Name: findNameTag(vpc.Tags),
-		Tags: intersectTags(vpc.Tags, e.Tags),
+		ID:         vpc.VpcId,
+		CIDR:       vpc.CidrBlock,
+		AmazonIPv6: aws.Bool(false),
+		Name:       findNameTag(vpc.Tags),
+		Tags:       intersectTags(vpc.Tags, e.Tags),
 	}
 
 	klog.V(4).Infof("found matching VPC %v", actual)
+
+	for _, association := range vpc.Ipv6CidrBlockAssociationSet {
+		if association == nil || association.Ipv6CidrBlockState == nil {
+			continue
+		}
+
+		state := aws.StringValue(association.Ipv6CidrBlockState.State)
+		if state != ec2.VpcCidrBlockStateCodeAssociated && state != ec2.VpcCidrBlockStateCodeAssociating {
+			continue
+		}
+
+		pool := aws.StringValue(association.Ipv6Pool)
+		if pool == "Amazon" {
+			actual.AmazonIPv6 = aws.Bool(true)
+			actual.IPv6CIDR = association.Ipv6CidrBlock
+			e.IPv6CIDR = association.Ipv6CidrBlock
+			break
+		}
+	}
 
 	if actual.ID != nil {
 		request := &ec2.DescribeVpcAttributeInput{VpcId: actual.ID, Attribute: aws.String(ec2.VpcAttributeNameEnableDnsSupport)}
@@ -252,6 +279,7 @@ type terraformVPC struct {
 	CIDR               *string           `json:"cidr_block,omitempty" cty:"cidr_block"`
 	EnableDNSHostnames *bool             `json:"enable_dns_hostnames,omitempty" cty:"enable_dns_hostnames"`
 	EnableDNSSupport   *bool             `json:"enable_dns_support,omitempty" cty:"enable_dns_support"`
+	AmazonIPv6         *bool             `json:"assign_generated_ipv6_cidr_block,omitempty" cty:"assign_generated_ipv6_cidr_block"`
 	Tags               map[string]string `json:"tags,omitempty" cty:"tags"`
 }
 
@@ -267,7 +295,7 @@ func (_ *VPC) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *VPC) 
 		return nil
 	}
 
-	if err := t.AddOutputVariable("vpc_cidr_block", terraform.LiteralProperty("aws_vpc", *e.Name, "cidr_block")); err != nil {
+	if err := t.AddOutputVariable("vpc_cidr_block", terraformWriter.LiteralProperty("aws_vpc", *e.Name, "cidr_block")); err != nil {
 		// TODO: Should we try to output vpc_cidr_block for shared vpcs?
 		return err
 	}
@@ -277,12 +305,13 @@ func (_ *VPC) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *VPC) 
 		Tags:               e.Tags,
 		EnableDNSHostnames: e.EnableDNSHostnames,
 		EnableDNSSupport:   e.EnableDNSSupport,
+		AmazonIPv6:         e.AmazonIPv6,
 	}
 
 	return t.RenderResource("aws_vpc", *e.Name, tf)
 }
 
-func (e *VPC) TerraformLink() *terraform.Literal {
+func (e *VPC) TerraformLink() *terraformWriter.Literal {
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		if e.ID == nil {
@@ -290,10 +319,10 @@ func (e *VPC) TerraformLink() *terraform.Literal {
 		}
 
 		klog.V(4).Infof("reusing existing VPC with id %q", *e.ID)
-		return terraform.LiteralFromStringValue(*e.ID)
+		return terraformWriter.LiteralFromStringValue(*e.ID)
 	}
 
-	return terraform.LiteralProperty("aws_vpc", *e.Name, "id")
+	return terraformWriter.LiteralProperty("aws_vpc", *e.Name, "id")
 }
 
 type cloudformationVPC struct {

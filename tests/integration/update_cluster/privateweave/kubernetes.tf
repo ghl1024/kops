@@ -116,11 +116,12 @@ resource "aws_autoscaling_group" "bastion-privateweave-example-com" {
     id      = aws_launch_template.bastion-privateweave-example-com.id
     version = aws_launch_template.bastion-privateweave-example-com.latest_version
   }
-  load_balancers      = [aws_elb.bastion-privateweave-example-com.id]
-  max_size            = 1
-  metrics_granularity = "1Minute"
-  min_size            = 1
-  name                = "bastion.privateweave.example.com"
+  load_balancers        = [aws_elb.bastion-privateweave-example-com.id]
+  max_size              = 1
+  metrics_granularity   = "1Minute"
+  min_size              = 1
+  name                  = "bastion.privateweave.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -165,11 +166,12 @@ resource "aws_autoscaling_group" "master-us-test-1a-masters-privateweave-example
     id      = aws_launch_template.master-us-test-1a-masters-privateweave-example-com.id
     version = aws_launch_template.master-us-test-1a-masters-privateweave-example-com.latest_version
   }
-  load_balancers      = [aws_elb.api-privateweave-example-com.id]
-  max_size            = 1
-  metrics_granularity = "1Minute"
-  min_size            = 1
-  name                = "master-us-test-1a.masters.privateweave.example.com"
+  load_balancers        = [aws_elb.api-privateweave-example-com.id]
+  max_size              = 1
+  metrics_granularity   = "1Minute"
+  min_size              = 1
+  name                  = "master-us-test-1a.masters.privateweave.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -229,10 +231,11 @@ resource "aws_autoscaling_group" "nodes-privateweave-example-com" {
     id      = aws_launch_template.nodes-privateweave-example-com.id
     version = aws_launch_template.nodes-privateweave-example-com.latest_version
   }
-  max_size            = 2
-  metrics_granularity = "1Minute"
-  min_size            = 2
-  name                = "nodes.privateweave.example.com"
+  max_size              = 2
+  metrics_granularity   = "1Minute"
+  min_size              = 2
+  name                  = "nodes.privateweave.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -393,24 +396,6 @@ resource "aws_iam_instance_profile" "nodes-privateweave-example-com" {
   }
 }
 
-resource "aws_iam_role_policy" "bastions-privateweave-example-com" {
-  name   = "bastions.privateweave.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_bastions.privateweave.example.com_policy")
-  role   = aws_iam_role.bastions-privateweave-example-com.name
-}
-
-resource "aws_iam_role_policy" "masters-privateweave-example-com" {
-  name   = "masters.privateweave.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_masters.privateweave.example.com_policy")
-  role   = aws_iam_role.masters-privateweave-example-com.name
-}
-
-resource "aws_iam_role_policy" "nodes-privateweave-example-com" {
-  name   = "nodes.privateweave.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_nodes.privateweave.example.com_policy")
-  role   = aws_iam_role.nodes-privateweave-example-com.name
-}
-
 resource "aws_iam_role" "bastions-privateweave-example-com" {
   assume_role_policy = file("${path.module}/data/aws_iam_role_bastions.privateweave.example.com_policy")
   name               = "bastions.privateweave.example.com"
@@ -439,6 +424,24 @@ resource "aws_iam_role" "nodes-privateweave-example-com" {
     "Name"                                           = "nodes.privateweave.example.com"
     "kubernetes.io/cluster/privateweave.example.com" = "owned"
   }
+}
+
+resource "aws_iam_role_policy" "bastions-privateweave-example-com" {
+  name   = "bastions.privateweave.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_bastions.privateweave.example.com_policy")
+  role   = aws_iam_role.bastions-privateweave-example-com.name
+}
+
+resource "aws_iam_role_policy" "masters-privateweave-example-com" {
+  name   = "masters.privateweave.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_masters.privateweave.example.com_policy")
+  role   = aws_iam_role.masters-privateweave-example-com.name
+}
+
+resource "aws_iam_role_policy" "nodes-privateweave-example-com" {
+  name   = "nodes.privateweave.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_nodes.privateweave.example.com_policy")
+  role   = aws_iam_role.nodes-privateweave-example-com.name
 }
 
 resource "aws_internet_gateway" "privateweave-example-com" {
@@ -486,10 +489,14 @@ resource "aws_launch_template" "bastion-privateweave-example-com" {
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "bastion.privateweave.example.com"
   network_interfaces {
     associate_public_ip_address = true
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.bastion-privateweave-example-com.id]
   }
   tag_specifications {
@@ -557,10 +564,14 @@ resource "aws_launch_template" "master-us-test-1a-masters-privateweave-example-c
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "master-us-test-1a.masters.privateweave.example.com"
   network_interfaces {
     associate_public_ip_address = false
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.masters-privateweave-example-com.id]
   }
   tag_specifications {
@@ -634,10 +645,14 @@ resource "aws_launch_template" "nodes-privateweave-example-com" {
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "nodes.privateweave.example.com"
   network_interfaces {
     associate_public_ip_address = false
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.nodes-privateweave-example-com.id]
   }
   tag_specifications {
@@ -686,6 +701,24 @@ resource "aws_nat_gateway" "us-test-1a-privateweave-example-com" {
   }
 }
 
+resource "aws_route" "route-0-0-0-0--0" {
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.privateweave-example-com.id
+  route_table_id         = aws_route_table.privateweave-example-com.id
+}
+
+resource "aws_route" "route-__--0" {
+  destination_ipv6_cidr_block = "::/0"
+  gateway_id                  = aws_internet_gateway.privateweave-example-com.id
+  route_table_id              = aws_route_table.privateweave-example-com.id
+}
+
+resource "aws_route" "route-private-us-test-1a-0-0-0-0--0" {
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.us-test-1a-privateweave-example-com.id
+  route_table_id         = aws_route_table.private-us-test-1a-privateweave-example-com.id
+}
+
 resource "aws_route53_record" "api-privateweave-example-com" {
   alias {
     evaluate_target_health = false
@@ -695,16 +728,6 @@ resource "aws_route53_record" "api-privateweave-example-com" {
   name    = "api.privateweave.example.com"
   type    = "A"
   zone_id = "/hostedzone/Z1AFAKE1ZON3YO"
-}
-
-resource "aws_route_table_association" "private-us-test-1a-privateweave-example-com" {
-  route_table_id = aws_route_table.private-us-test-1a-privateweave-example-com.id
-  subnet_id      = aws_subnet.us-test-1a-privateweave-example-com.id
-}
-
-resource "aws_route_table_association" "utility-us-test-1a-privateweave-example-com" {
-  route_table_id = aws_route_table.privateweave-example-com.id
-  subnet_id      = aws_subnet.utility-us-test-1a-privateweave-example-com.id
 }
 
 resource "aws_route_table" "private-us-test-1a-privateweave-example-com" {
@@ -727,16 +750,195 @@ resource "aws_route_table" "privateweave-example-com" {
   vpc_id = aws_vpc.privateweave-example-com.id
 }
 
-resource "aws_route" "route-0-0-0-0--0" {
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.privateweave-example-com.id
-  route_table_id         = aws_route_table.privateweave-example-com.id
+resource "aws_route_table_association" "private-us-test-1a-privateweave-example-com" {
+  route_table_id = aws_route_table.private-us-test-1a-privateweave-example-com.id
+  subnet_id      = aws_subnet.us-test-1a-privateweave-example-com.id
 }
 
-resource "aws_route" "route-private-us-test-1a-0-0-0-0--0" {
-  destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.us-test-1a-privateweave-example-com.id
-  route_table_id         = aws_route_table.private-us-test-1a-privateweave-example-com.id
+resource "aws_route_table_association" "utility-us-test-1a-privateweave-example-com" {
+  route_table_id = aws_route_table.privateweave-example-com.id
+  subnet_id      = aws_subnet.utility-us-test-1a-privateweave-example-com.id
+}
+
+resource "aws_s3_bucket_object" "cluster-completed-spec" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_cluster-completed.spec_content")
+  key                    = "clusters.example.com/privateweave.example.com/cluster-completed.spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-events_content")
+  key                    = "clusters.example.com/privateweave.example.com/backups/etcd/events/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-main_content")
+  key                    = "clusters.example.com/privateweave.example.com/backups/etcd/main/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "kops-version-txt" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_kops-version.txt_content")
+  key                    = "clusters.example.com/privateweave.example.com/kops-version.txt"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-events_content")
+  key                    = "clusters.example.com/privateweave.example.com/manifests/etcd/events.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-main_content")
+  key                    = "clusters.example.com/privateweave.example.com/manifests/etcd/main.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-static-kube-apiserver-healthcheck" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-static-kube-apiserver-healthcheck_content")
+  key                    = "clusters.example.com/privateweave.example.com/manifests/static/kube-apiserver-healthcheck.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-master-us-test-1a" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-master-us-test-1a_content")
+  key                    = "clusters.example.com/privateweave.example.com/igconfig/master/master-us-test-1a/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-nodes" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-nodes_content")
+  key                    = "clusters.example.com/privateweave.example.com/igconfig/node/nodes/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-bootstrap" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-bootstrap_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/bootstrap-channel.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-core-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-core.addons.k8s.io_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/core.addons.k8s.io/v1.4.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-coredns-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-coredns.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/coredns.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-dns-controller-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-dns-controller.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/dns-controller.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-kops-controller-addons-k8s-io-k8s-1-16" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-kops-controller.addons.k8s.io-k8s-1.16_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/kops-controller.addons.k8s.io/k8s-1.16.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-kubelet-api-rbac-addons-k8s-io-k8s-1-9" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-kubelet-api.rbac.addons.k8s.io-k8s-1.9_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/kubelet-api.rbac.addons.k8s.io/k8s-1.9.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-limit-range-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-limit-range.addons.k8s.io_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/limit-range.addons.k8s.io/v1.5.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-networking-weave-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-networking.weave-k8s-1.12_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/networking.weave/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privateweave-example-com-addons-storage-aws-addons-k8s-io-v1-15-0" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privateweave.example.com-addons-storage-aws.addons.k8s.io-v1.15.0_content")
+  key                    = "clusters.example.com/privateweave.example.com/addons/storage-aws.addons.k8s.io/v1.15.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_security_group" "api-elb-privateweave-example-com" {
+  description = "Security group for api ELB"
+  name        = "api-elb.privateweave.example.com"
+  tags = {
+    "KubernetesCluster"                              = "privateweave.example.com"
+    "Name"                                           = "api-elb.privateweave.example.com"
+    "kubernetes.io/cluster/privateweave.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privateweave-example-com.id
+}
+
+resource "aws_security_group" "bastion-elb-privateweave-example-com" {
+  description = "Security group for bastion ELB"
+  name        = "bastion-elb.privateweave.example.com"
+  tags = {
+    "KubernetesCluster"                              = "privateweave.example.com"
+    "Name"                                           = "bastion-elb.privateweave.example.com"
+    "kubernetes.io/cluster/privateweave.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privateweave-example-com.id
+}
+
+resource "aws_security_group" "bastion-privateweave-example-com" {
+  description = "Security group for bastion"
+  name        = "bastion.privateweave.example.com"
+  tags = {
+    "KubernetesCluster"                              = "privateweave.example.com"
+    "Name"                                           = "bastion.privateweave.example.com"
+    "kubernetes.io/cluster/privateweave.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privateweave-example-com.id
+}
+
+resource "aws_security_group" "masters-privateweave-example-com" {
+  description = "Security group for masters"
+  name        = "masters.privateweave.example.com"
+  tags = {
+    "KubernetesCluster"                              = "privateweave.example.com"
+    "Name"                                           = "masters.privateweave.example.com"
+    "kubernetes.io/cluster/privateweave.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privateweave-example-com.id
+}
+
+resource "aws_security_group" "nodes-privateweave-example-com" {
+  description = "Security group for nodes"
+  name        = "nodes.privateweave.example.com"
+  tags = {
+    "KubernetesCluster"                              = "privateweave.example.com"
+    "Name"                                           = "nodes.privateweave.example.com"
+    "kubernetes.io/cluster/privateweave.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privateweave-example-com.id
 }
 
 resource "aws_security_group_rule" "from-0-0-0-0--0-ingress-tcp-22to22-bastion-elb-privateweave-example-com" {
@@ -766,9 +968,27 @@ resource "aws_security_group_rule" "from-api-elb-privateweave-example-com-egress
   type              = "egress"
 }
 
+resource "aws_security_group_rule" "from-api-elb-privateweave-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "-1"
+  security_group_id = aws_security_group.api-elb-privateweave-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
 resource "aws_security_group_rule" "from-bastion-elb-privateweave-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.bastion-elb-privateweave-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-bastion-elb-privateweave-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.bastion-elb-privateweave-example-com.id
   to_port           = 0
@@ -787,6 +1007,15 @@ resource "aws_security_group_rule" "from-bastion-elb-privateweave-example-com-in
 resource "aws_security_group_rule" "from-bastion-privateweave-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.bastion-privateweave-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-bastion-privateweave-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.bastion-privateweave-example-com.id
   to_port           = 0
@@ -820,6 +1049,15 @@ resource "aws_security_group_rule" "from-masters-privateweave-example-com-egress
   type              = "egress"
 }
 
+resource "aws_security_group_rule" "from-masters-privateweave-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "-1"
+  security_group_id = aws_security_group.masters-privateweave-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
 resource "aws_security_group_rule" "from-masters-privateweave-example-com-ingress-all-0to0-masters-privateweave-example-com" {
   from_port                = 0
   protocol                 = "-1"
@@ -841,6 +1079,15 @@ resource "aws_security_group_rule" "from-masters-privateweave-example-com-ingres
 resource "aws_security_group_rule" "from-nodes-privateweave-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.nodes-privateweave-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-nodes-privateweave-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.nodes-privateweave-example-com.id
   to_port           = 0
@@ -910,61 +1157,6 @@ resource "aws_security_group_rule" "icmp-pmtu-api-elb-0-0-0-0--0" {
   type              = "ingress"
 }
 
-resource "aws_security_group" "api-elb-privateweave-example-com" {
-  description = "Security group for api ELB"
-  name        = "api-elb.privateweave.example.com"
-  tags = {
-    "KubernetesCluster"                              = "privateweave.example.com"
-    "Name"                                           = "api-elb.privateweave.example.com"
-    "kubernetes.io/cluster/privateweave.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privateweave-example-com.id
-}
-
-resource "aws_security_group" "bastion-elb-privateweave-example-com" {
-  description = "Security group for bastion ELB"
-  name        = "bastion-elb.privateweave.example.com"
-  tags = {
-    "KubernetesCluster"                              = "privateweave.example.com"
-    "Name"                                           = "bastion-elb.privateweave.example.com"
-    "kubernetes.io/cluster/privateweave.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privateweave-example-com.id
-}
-
-resource "aws_security_group" "bastion-privateweave-example-com" {
-  description = "Security group for bastion"
-  name        = "bastion.privateweave.example.com"
-  tags = {
-    "KubernetesCluster"                              = "privateweave.example.com"
-    "Name"                                           = "bastion.privateweave.example.com"
-    "kubernetes.io/cluster/privateweave.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privateweave-example-com.id
-}
-
-resource "aws_security_group" "masters-privateweave-example-com" {
-  description = "Security group for masters"
-  name        = "masters.privateweave.example.com"
-  tags = {
-    "KubernetesCluster"                              = "privateweave.example.com"
-    "Name"                                           = "masters.privateweave.example.com"
-    "kubernetes.io/cluster/privateweave.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privateweave-example-com.id
-}
-
-resource "aws_security_group" "nodes-privateweave-example-com" {
-  description = "Security group for nodes"
-  name        = "nodes.privateweave.example.com"
-  tags = {
-    "KubernetesCluster"                              = "privateweave.example.com"
-    "Name"                                           = "nodes.privateweave.example.com"
-    "kubernetes.io/cluster/privateweave.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privateweave-example-com.id
-}
-
 resource "aws_subnet" "us-test-1a-privateweave-example-com" {
   availability_zone = "us-test-1a"
   cidr_block        = "172.20.32.0/19"
@@ -991,9 +1183,16 @@ resource "aws_subnet" "utility-us-test-1a-privateweave-example-com" {
   vpc_id = aws_vpc.privateweave-example-com.id
 }
 
-resource "aws_vpc_dhcp_options_association" "privateweave-example-com" {
-  dhcp_options_id = aws_vpc_dhcp_options.privateweave-example-com.id
-  vpc_id          = aws_vpc.privateweave-example-com.id
+resource "aws_vpc" "privateweave-example-com" {
+  assign_generated_ipv6_cidr_block = true
+  cidr_block                       = "172.20.0.0/16"
+  enable_dns_hostnames             = true
+  enable_dns_support               = true
+  tags = {
+    "KubernetesCluster"                              = "privateweave.example.com"
+    "Name"                                           = "privateweave.example.com"
+    "kubernetes.io/cluster/privateweave.example.com" = "owned"
+  }
 }
 
 resource "aws_vpc_dhcp_options" "privateweave-example-com" {
@@ -1006,15 +1205,9 @@ resource "aws_vpc_dhcp_options" "privateweave-example-com" {
   }
 }
 
-resource "aws_vpc" "privateweave-example-com" {
-  cidr_block           = "172.20.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-  tags = {
-    "KubernetesCluster"                              = "privateweave.example.com"
-    "Name"                                           = "privateweave.example.com"
-    "kubernetes.io/cluster/privateweave.example.com" = "owned"
-  }
+resource "aws_vpc_dhcp_options_association" "privateweave-example-com" {
+  dhcp_options_id = aws_vpc_dhcp_options.privateweave-example-com.id
+  vpc_id          = aws_vpc.privateweave-example-com.id
 }
 
 terraform {

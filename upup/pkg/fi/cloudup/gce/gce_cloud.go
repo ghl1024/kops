@@ -26,7 +26,6 @@ import (
 
 	"golang.org/x/oauth2/google"
 	compute "google.golang.org/api/compute/v1"
-	"google.golang.org/api/dns/v1"
 	"google.golang.org/api/iam/v1"
 	oauth2 "google.golang.org/api/oauth2/v2"
 	"google.golang.org/api/storage/v1"
@@ -39,18 +38,14 @@ import (
 
 type GCECloud interface {
 	fi.Cloud
-	Compute() *compute.Service
+	Compute() ComputeClient
 	Storage() *storage.Service
 	IAM() *iam.Service
-	CloudDNS() *dns.Service
+	CloudDNS() DNSClient
 
 	Project() string
 	WaitForOp(op *compute.Operation) error
-	GetApiIngressStatus(cluster *kops.Cluster) ([]kops.ApiIngressStatus, error)
 	Labels() map[string]string
-
-	// FindClusterStatus gets the status of the cluster as it exists in GCE, inferred from volumes
-	FindClusterStatus(cluster *kops.Cluster) (*kops.ClusterStatus, error)
 
 	Zones() ([]string, error)
 
@@ -59,10 +54,10 @@ type GCECloud interface {
 }
 
 type gceCloudImplementation struct {
-	compute *compute.Service
+	compute *computeClientImpl
 	storage *storage.Service
 	iam     *iam.Service
-	dns     *dns.Service
+	dns     *dnsClientImpl
 
 	region  string
 	project string
@@ -126,11 +121,11 @@ func NewGCECloud(region string, project string, labels map[string]string) (GCECl
 		klog.Infof("Will load GOOGLE_APPLICATION_CREDENTIALS from %s", os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 	}
 
-	computeService, err := compute.NewService(ctx)
+	computeClient, err := newComputeClientImpl(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error building compute API client: %v", err)
 	}
-	c.compute = computeService
+	c.compute = computeClient
 
 	storageService, err := storage.NewService(ctx)
 	if err != nil {
@@ -144,13 +139,13 @@ func NewGCECloud(region string, project string, labels map[string]string) (GCECl
 	}
 	c.iam = iamService
 
-	dnsService, err := dns.NewService(ctx)
+	dnsClient, err := newDNSClientImpl(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error building DNS API client: %v", err)
 	}
-	c.dns = dnsService
+	c.dns = dnsClient
 
-	gceCloudInstances[region+"::"+project] = c
+	CacheGCECloudInstance(region, project, c)
 
 	{
 		// Attempt to log the current GCE service account in user, for diagnostic purposes
@@ -164,6 +159,10 @@ func NewGCECloud(region string, project string, labels map[string]string) (GCECl
 	}
 
 	return c.WithLabels(labels), nil
+}
+
+func CacheGCECloudInstance(region string, project string, c GCECloud) {
+	gceCloudInstances[region+"::"+project] = c
 }
 
 // gceCloudInternal is an interface for private functions for a gceCloudImplemention or mockGCECloud
@@ -181,7 +180,7 @@ func (c *gceCloudImplementation) WithLabels(labels map[string]string) GCECloud {
 }
 
 // Compute returns private struct element compute.
-func (c *gceCloudImplementation) Compute() *compute.Service {
+func (c *gceCloudImplementation) Compute() ComputeClient {
 	return c.compute
 }
 
@@ -196,7 +195,7 @@ func (c *gceCloudImplementation) IAM() *iam.Service {
 }
 
 // NameService returns the DNS client
-func (c *gceCloudImplementation) CloudDNS() *dns.Service {
+func (c *gceCloudImplementation) CloudDNS() DNSClient {
 	return c.dns
 }
 
@@ -215,7 +214,7 @@ func (c *gceCloudImplementation) ServiceAccount() (string, error) {
 	if c.projectInfo == nil {
 		// Find the project info from the compute API, which includes the default service account
 		klog.V(2).Infof("fetching project %q from compute API", c.project)
-		p, err := c.compute.Projects.Get(c.project).Do()
+		p, err := c.compute.Projects().Get(c.project)
 		if err != nil {
 			return "", fmt.Errorf("error fetching info for project %q: %v", c.project, err)
 		}
@@ -259,11 +258,11 @@ func (c *gceCloudImplementation) Labels() map[string]string {
 func (c *gceCloudImplementation) Zones() ([]string, error) {
 	var zones []string
 	// TODO: Only zones in api.Cluster object, if we have one?
-	gceZones, err := c.Compute().Zones.List(c.Project()).Do()
+	gceZones, err := c.Compute().Zones().List(context.Background(), c.Project())
 	if err != nil {
 		return nil, fmt.Errorf("error listing zones: %v", err)
 	}
-	for _, gceZone := range gceZones.Items {
+	for _, gceZone := range gceZones {
 		u, err := ParseGoogleCloudURL(gceZone.Region)
 		if err != nil {
 			return nil, err
@@ -282,17 +281,17 @@ func (c *gceCloudImplementation) Zones() ([]string, error) {
 }
 
 func (c *gceCloudImplementation) WaitForOp(op *compute.Operation) error {
-	return WaitForOp(c.compute, op)
+	return WaitForOp(c.compute.srv, op)
 }
 
-func (c *gceCloudImplementation) GetApiIngressStatus(cluster *kops.Cluster) ([]kops.ApiIngressStatus, error) {
-	var ingresses []kops.ApiIngressStatus
+func (c *gceCloudImplementation) GetApiIngressStatus(cluster *kops.Cluster) ([]fi.ApiIngressStatus, error) {
+	var ingresses []fi.ApiIngressStatus
 
 	// Note that this must match GCEModelContext::NameForForwardingRule
 	name := SafeObjectName("api", cluster.ObjectMeta.Name)
 
 	klog.V(2).Infof("Querying GCE to find ForwardingRules for API (%q)", name)
-	forwardingRule, err := c.compute.ForwardingRules.Get(c.project, c.region, name).Do()
+	forwardingRule, err := c.compute.ForwardingRules().Get(c.project, c.region, name)
 	if err != nil {
 		if !IsNotFound(err) {
 			forwardingRule = nil
@@ -306,7 +305,7 @@ func (c *gceCloudImplementation) GetApiIngressStatus(cluster *kops.Cluster) ([]k
 			return nil, fmt.Errorf("found forward rule %q, but it did not have an IPAddress", name)
 		}
 
-		ingresses = append(ingresses, kops.ApiIngressStatus{
+		ingresses = append(ingresses, fi.ApiIngressStatus{
 			IP: forwardingRule.IPAddress,
 		})
 	}
@@ -318,34 +317,32 @@ func (c *gceCloudImplementation) GetApiIngressStatus(cluster *kops.Cluster) ([]k
 // It matches them by looking for instance metadata with key='cluster-name' and value of our cluster name
 func FindInstanceTemplates(c GCECloud, clusterName string) ([]*compute.InstanceTemplate, error) {
 	findClusterName := strings.TrimSpace(clusterName)
-	var matches []*compute.InstanceTemplate
-	ctx := context.Background()
 
-	err := c.Compute().InstanceTemplates.List(c.Project()).Pages(ctx, func(page *compute.InstanceTemplateList) error {
-		for _, t := range page.Items {
-			match := false
-			for _, item := range t.Properties.Metadata.Items {
-				if item.Key == "cluster-name" {
-					value := fi.StringValue(item.Value)
-					if strings.TrimSpace(value) == findClusterName {
-						match = true
-					} else {
-						match = false
-						break
-					}
-				}
-			}
-
-			if !match {
-				continue
-			}
-
-			matches = append(matches, t)
-		}
-		return nil
-	})
+	ts, err := c.Compute().InstanceTemplates().List(context.Background(), c.Project())
 	if err != nil {
 		return nil, fmt.Errorf("error listing instance templates: %v", err)
+	}
+
+	var matches []*compute.InstanceTemplate
+	for _, t := range ts {
+		match := false
+		for _, item := range t.Properties.Metadata.Items {
+			if item.Key == "cluster-name" {
+				value := fi.StringValue(item.Value)
+				if strings.TrimSpace(value) == findClusterName {
+					match = true
+				} else {
+					match = false
+					break
+				}
+			}
+		}
+
+		if !match {
+			continue
+		}
+
+		matches = append(matches, t)
 	}
 
 	return matches, nil

@@ -35,9 +35,8 @@ import (
 	"github.com/google/uuid"
 )
 
-//go:generate fitask -type=RoleAssignment
-
 // RoleAssignment is an Azure Role Assignment.
+// +kops:fitask
 type RoleAssignment struct {
 	// Name is the name of the RoleAssignment task. This is
 	// different from a name of Role Assignment, which is GUID.
@@ -45,7 +44,7 @@ type RoleAssignment struct {
 	// name generated from kops cluster config, we keep a task
 	// name and a Role Assignment name separate.
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	ResourceGroup *ResourceGroup
 	VMScaleSet    *VMScaleSet

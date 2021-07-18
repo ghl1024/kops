@@ -43,19 +43,10 @@ func (b BootstrapClientBuilder) Build(c *fi.ModelBuilderContext) error {
 	var err error
 	switch kops.CloudProviderID(b.Cluster.Spec.CloudProvider) {
 	case kops.CloudProviderAWS:
-		region, regionErr := awsup.FindRegion(b.Cluster)
-		if regionErr != nil {
-			return fmt.Errorf("querying AWS region: %v", regionErr)
-		}
-		authenticator, err = awsup.NewAWSAuthenticator(region)
+		authenticator, err = awsup.NewAWSAuthenticator(b.Cloud.Region())
 	default:
 		return fmt.Errorf("unsupported cloud provider %s", b.Cluster.Spec.CloudProvider)
 	}
-	if err != nil {
-		return err
-	}
-
-	cert, err := b.GetCert(fi.CertificateIDCA)
 	if err != nil {
 		return err
 	}
@@ -68,13 +59,14 @@ func (b BootstrapClientBuilder) Build(c *fi.ModelBuilderContext) error {
 
 	bootstrapClient := &nodetasks.KopsBootstrapClient{
 		Authenticator: authenticator,
-		CA:            cert,
+		CAs:           []byte(b.NodeupConfig.CAs[fi.CertificateIDCA]),
 		BaseURL:       baseURL,
 	}
 
 	bootstrapClientTask := &nodetasks.BootstrapClientTask{
-		Client: bootstrapClient,
-		Certs:  b.bootstrapCerts,
+		Client:     bootstrapClient,
+		Certs:      b.bootstrapCerts,
+		KeypairIDs: b.bootstrapKeypairIDs,
 	}
 
 	for _, cert := range b.bootstrapCerts {

@@ -25,12 +25,13 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/aliup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type VPC struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	ID     *string
 	Region *string
@@ -173,6 +174,6 @@ func (_ *VPC) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *VPC) 
 	return t.RenderResource("alicloud_vpc", *e.Name, tf)
 }
 
-func (e *VPC) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("alicloud_vpc", *e.Name, "id")
+func (e *VPC) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("alicloud_vpc", *e.Name, "id")
 }

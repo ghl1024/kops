@@ -58,15 +58,15 @@ spec:
       providerID: aws
       architectureID: amd64
       kubernetesVersion: ">=1.17.0 <1.18.0"
-    - name: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210325
+    - name: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20210518
       providerID: aws
       architectureID: amd64
       kubernetesVersion: ">=1.18.0"
-    - name: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-arm64-server-20210325
+    - name: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-arm64-server-20210518
       providerID: aws
       architectureID: arm64
       kubernetesVersion: ">=1.20.0"
-    - name: "cos-cloud/cos-stable-65-10323-99-0"
+    - name: cos-cloud/cos-stable-65-10323-99-0
       providerID: gce
       architectureID: amd64
       kubernetesVersion: "<1.16.0-alpha.1"
@@ -74,11 +74,11 @@ spec:
       providerID: gce
       architectureID: amd64
       kubernetesVersion: ">=1.16.0 <1.18.0"
-    - name: "ubuntu-os-cloud/ubuntu-2004-focal-v20210325"
+    - name: ubuntu-os-cloud/ubuntu-2004-focal-v20210415
       providerID: gce
       architectureID: amd64
       kubernetesVersion: ">=1.18.0"
-    - name: "Canonical:UbuntuServer:20.04-LTS:latest"
+    - name: Canonical:0001-com-ubuntu-server-focal:20_04-lts-gen2:20.04.202104150
       providerID: azure
       architectureID: amd64
       kubernetesVersion: ">=1.20.0"
@@ -87,14 +87,17 @@ spec:
     networking:
       kubenet: {}
   kubernetesVersions:
+  - range: ">=1.21.0"
+    recommendedVersion: 1.21.3
+    requiredVersion: 1.21.0
   - range: ">=1.20.0"
-    recommendedVersion: 1.20.6
+    recommendedVersion: 1.20.9
     requiredVersion: 1.20.0
   - range: ">=1.19.0"
-    recommendedVersion: 1.19.10
+    recommendedVersion: 1.19.13
     requiredVersion: 1.19.0
   - range: ">=1.18.0"
-    recommendedVersion: 1.18.18
+    recommendedVersion: 1.18.20
     requiredVersion: 1.18.0
   - range: ">=1.17.0"
     recommendedVersion: 1.17.17
@@ -121,18 +124,22 @@ spec:
     recommendedVersion: 1.11.10
     requiredVersion: 1.11.10
   kopsVersions:
+  - range: ">=1.21.0-alpha.1"
+    #recommendedVersion: "1.21.0-beta.1"
+    #requiredVersion: 1.21.0
+    kubernetesVersion: 1.21.3
   - range: ">=1.20.0-alpha.1"
     recommendedVersion: "1.20.0"
     #requiredVersion: 1.20.0
-    kubernetesVersion: 1.20.6
+    kubernetesVersion: 1.20.9
   - range: ">=1.19.0-alpha.1"
     recommendedVersion: "1.20.0"
     #requiredVersion: 1.19.0
-    kubernetesVersion: 1.19.10
+    kubernetesVersion: 1.19.13
   - range: ">=1.18.0-alpha.1"
     recommendedVersion: "1.20.0"
     #requiredVersion: 1.18.0
-    kubernetesVersion: 1.18.18
+    kubernetesVersion: 1.18.20
   - range: ">=1.17.0-alpha.1"
     recommendedVersion: "1.20.0"
     #requiredVersion: 1.17.0

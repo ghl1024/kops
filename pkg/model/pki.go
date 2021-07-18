@@ -30,7 +30,7 @@ import (
 // PKIModelBuilder configures PKI keypairs, as well as tokens
 type PKIModelBuilder struct {
 	*KopsModelContext
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &PKIModelBuilder{}
@@ -42,7 +42,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	defaultCA := &fitasks.Keypair{
 		Name:      fi.String(fi.CertificateIDCA),
 		Lifecycle: b.Lifecycle,
-		Subject:   "cn=kubernetes",
+		Subject:   "cn=kubernetes-ca",
 		Type:      "ca",
 	}
 	c.AddTask(defaultCA)
@@ -131,10 +131,11 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 
 	if b.KopsModelContext.Cluster.Spec.Networking.Kuberouter != nil && !b.UseKopsControllerForNodeBootstrap() {
 		t := &fitasks.Keypair{
-			Name:    fi.String("kube-router"),
-			Subject: "cn=" + rbac.KubeRouter,
-			Type:    "client",
-			Signer:  defaultCA,
+			Name:      fi.String("kube-router"),
+			Lifecycle: b.Lifecycle,
+			Subject:   "cn=" + rbac.KubeRouter,
+			Type:      "client",
+			Signer:    defaultCA,
 		}
 		c.AddTask(t)
 	}
@@ -177,6 +178,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		// @note: the certificate used by the node authorizers
 		c.AddTask(&fitasks.Keypair{
 			Name:           fi.String("node-authorizer"),
+			Lifecycle:      b.Lifecycle,
 			Subject:        "cn=node-authorizaer",
 			Type:           "server",
 			AlternateNames: alternateNames,
@@ -185,10 +187,11 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 
 		// @note: we use this for mutual tls between node and authorizer
 		c.AddTask(&fitasks.Keypair{
-			Name:    fi.String("node-authorizer-client"),
-			Subject: "cn=node-authorizer-client",
-			Type:    "client",
-			Signer:  defaultCA,
+			Name:      fi.String("node-authorizer-client"),
+			Lifecycle: b.Lifecycle,
+			Subject:   "cn=node-authorizer-client",
+			Type:      "client",
+			Signer:    defaultCA,
 		})
 	}
 
@@ -205,6 +208,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 
 		t := &fitasks.MirrorSecrets{
 			Name:       fi.String("mirror-secrets"),
+			Lifecycle:  b.Lifecycle,
 			MirrorPath: mirrorPath,
 		}
 		c.AddTask(t)
@@ -219,6 +223,7 @@ func (b *PKIModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		// Keypair used by the kubelet
 		t := &fitasks.MirrorKeystore{
 			Name:       fi.String("mirror-keystore"),
+			Lifecycle:  b.Lifecycle,
 			MirrorPath: mirrorPath,
 		}
 		c.AddTask(t)

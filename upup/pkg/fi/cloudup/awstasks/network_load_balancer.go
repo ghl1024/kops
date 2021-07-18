@@ -31,17 +31,18 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // NetworkLoadBalancer manages an NLB.  We find the existing NLB using the Name tag.
 var _ DNSTarget = &NetworkLoadBalancer{}
 
-//go:generate fitask -type=NetworkLoadBalancer
+// +kops:fitask
 type NetworkLoadBalancer struct {
 	// We use the Name tag to find the existing NLB, because we are (more or less) unrestricted when
 	// it comes to tag values, but the LoadBalancerName is length limited
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	// LoadBalancerName is the name in NLB, possibly different from our name
 	// (NLB is restricted as to names, so we have limited choices!)
@@ -58,6 +59,8 @@ type NetworkLoadBalancer struct {
 	Scheme *string
 
 	CrossZoneLoadBalancing *bool
+
+	IpAddressType *string
 
 	Tags         map[string]string
 	ForAPIServer bool
@@ -210,66 +213,6 @@ func findNetworkLoadBalancerByAlias(cloud awsup.AWSCloud, alias *route53.AliasTa
 	return found[0], nil
 }
 
-func FindNetworkLoadBalancerByNameTag(cloud awsup.AWSCloud, findNameTag string) (*elbv2.LoadBalancer, error) {
-	// TODO: Any way around this?
-	klog.V(2).Infof("Listing all NLBs for findNetworkLoadBalancerByNameTag")
-
-	request := &elbv2.DescribeLoadBalancersInput{}
-	// ELB DescribeTags has a limit of 20 names, so we set the page size here to 20 also
-	request.PageSize = aws.Int64(20)
-
-	var found []*elbv2.LoadBalancer
-
-	var innerError error
-	err := cloud.ELBV2().DescribeLoadBalancersPages(request, func(p *elbv2.DescribeLoadBalancersOutput, lastPage bool) bool {
-		if len(p.LoadBalancers) == 0 {
-			return true
-		}
-
-		// TODO: Filter by cluster?
-
-		var arns []string
-		arnToELB := make(map[string]*elbv2.LoadBalancer)
-		for _, elb := range p.LoadBalancers {
-			arn := aws.StringValue(elb.LoadBalancerArn)
-			arnToELB[arn] = elb
-			arns = append(arns, arn)
-		}
-
-		tagMap, err := describeNetworkLoadBalancerTags(cloud, arns)
-		if err != nil {
-			innerError = err
-			return false
-		}
-
-		for loadBalancerArn, tags := range tagMap {
-			name, foundNameTag := awsup.FindELBV2Tag(tags, "Name")
-			if !foundNameTag || name != findNameTag {
-				continue
-			}
-			elb := arnToELB[loadBalancerArn]
-			found = append(found, elb)
-		}
-		return true
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error describing LoadBalancers: %v", err)
-	}
-	if innerError != nil {
-		return nil, fmt.Errorf("error describing LoadBalancers: %v", innerError)
-	}
-
-	if len(found) == 0 {
-		return nil, nil
-	}
-
-	if len(found) != 1 {
-		return nil, fmt.Errorf("Found multiple NLBs with Name %q", findNameTag)
-	}
-
-	return found[0], nil
-}
-
 func describeNetworkLoadBalancers(cloud awsup.AWSCloud, request *elbv2.DescribeLoadBalancersInput, filter func(*elbv2.LoadBalancer) bool) ([]*elbv2.LoadBalancer, error) {
 	var found []*elbv2.LoadBalancer
 	err := cloud.ELBV2().DescribeLoadBalancersPages(request, func(p *elbv2.DescribeLoadBalancersOutput, lastPage bool) (shouldContinue bool) {
@@ -289,26 +232,6 @@ func describeNetworkLoadBalancers(cloud awsup.AWSCloud, request *elbv2.DescribeL
 	return found, nil
 }
 
-func describeNetworkLoadBalancerTags(cloud awsup.AWSCloud, loadBalancerArns []string) (map[string][]*elbv2.Tag, error) {
-	// TODO: Filter by cluster?
-
-	request := &elbv2.DescribeTagsInput{}
-	request.ResourceArns = aws.StringSlice(loadBalancerArns)
-
-	// TODO: Cache?
-	klog.V(2).Infof("Querying ELBV2 api for tags for %s", loadBalancerArns)
-	response, err := cloud.ELBV2().DescribeTags(request)
-	if err != nil {
-		return nil, err
-	}
-
-	tagMap := make(map[string][]*elbv2.Tag)
-	for _, tagset := range response.TagDescriptions {
-		tagMap[aws.StringValue(tagset.ResourceArn)] = tagset.Tags
-	}
-	return tagMap, nil
-}
-
 func (e *NetworkLoadBalancer) getDNSName() *string {
 	return e.DNSName
 }
@@ -320,7 +243,7 @@ func (e *NetworkLoadBalancer) getHostedZoneId() *string {
 func (e *NetworkLoadBalancer) Find(c *fi.Context) (*NetworkLoadBalancer, error) {
 	cloud := c.Cloud.(awsup.AWSCloud)
 
-	lb, err := FindNetworkLoadBalancerByNameTag(cloud, e.Tags["Name"])
+	lb, err := cloud.FindELBV2ByNameTag(e.Tags["Name"])
 	if err != nil {
 		return nil, err
 	}
@@ -338,8 +261,9 @@ func (e *NetworkLoadBalancer) Find(c *fi.Context) (*NetworkLoadBalancer, error) 
 	actual.Scheme = lb.Scheme
 	actual.VPC = &VPC{ID: lb.VpcId}
 	actual.Type = lb.Type
+	actual.IpAddressType = lb.IpAddressType
 
-	tagMap, err := describeNetworkLoadBalancerTags(cloud, []string{*loadBalancerArn})
+	tagMap, err := cloud.DescribeELBV2Tags([]string{*loadBalancerArn})
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +411,7 @@ func (e *NetworkLoadBalancer) IsForAPIServer() bool {
 func (e *NetworkLoadBalancer) FindIPAddress(context *fi.Context) (*string, error) {
 	cloud := context.Cloud.(awsup.AWSCloud)
 
-	lb, err := FindNetworkLoadBalancerByNameTag(cloud, e.Tags["Name"])
+	lb, err := cloud.FindELBV2ByNameTag(e.Tags["Name"])
 	if err != nil {
 		return nil, err
 	}
@@ -581,6 +505,7 @@ func (_ *NetworkLoadBalancer) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Ne
 		request.Name = e.LoadBalancerName
 		request.Scheme = e.Scheme
 		request.Type = e.Type
+		request.IpAddressType = e.IpAddressType
 		request.Tags = awsup.ELBv2Tags(e.Tags)
 
 		for _, subnetMapping := range e.SubnetMappings {
@@ -633,6 +558,16 @@ func (_ *NetworkLoadBalancer) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Ne
 		}
 
 		loadBalancerArn = fi.StringValue(lb.LoadBalancerArn)
+
+		if changes.IpAddressType != nil {
+			request := &elbv2.SetIpAddressTypeInput{
+				IpAddressType:   e.IpAddressType,
+				LoadBalancerArn: lb.LoadBalancerArn,
+			}
+			if _, err := t.Cloud.ELBV2().SetIpAddressType(request); err != nil {
+				return fmt.Errorf("error setting the IP addresses type: %v", err)
+			}
+		}
 
 		if changes.SubnetMappings != nil {
 			actualSubnets := make(map[string]*string)
@@ -736,13 +671,13 @@ type terraformNetworkLoadBalancer struct {
 }
 
 type terraformNetworkLoadBalancerSubnetMapping struct {
-	Subnet             *terraform.Literal `json:"subnet_id" cty:"subnet_id"`
-	AllocationID       *string            `json:"allocation_id,omitempty" cty:"allocation_id"`
-	PrivateIPv4Address *string            `json:"private_ipv4_address,omitempty" cty:"private_ipv4_address"`
+	Subnet             *terraformWriter.Literal `json:"subnet_id" cty:"subnet_id"`
+	AllocationID       *string                  `json:"allocation_id,omitempty" cty:"allocation_id"`
+	PrivateIPv4Address *string                  `json:"private_ipv4_address,omitempty" cty:"private_ipv4_address"`
 }
 
 type terraformNetworkLoadBalancerListener struct {
-	LoadBalancer   *terraform.Literal                           `json:"load_balancer_arn" cty:"load_balancer_arn"`
+	LoadBalancer   *terraformWriter.Literal                     `json:"load_balancer_arn" cty:"load_balancer_arn"`
 	Port           int64                                        `json:"port" cty:"port"`
 	Protocol       string                                       `json:"protocol" cty:"protocol"`
 	CertificateARN *string                                      `json:"certificate_arn,omitempty" cty:"certificate_arn"`
@@ -751,8 +686,8 @@ type terraformNetworkLoadBalancerListener struct {
 }
 
 type terraformNetworkLoadBalancerListenerAction struct {
-	Type           string             `json:"type" cty:"type"`
-	TargetGroupARN *terraform.Literal `json:"target_group_arn,omitempty" cty:"target_group_arn"`
+	Type           string                   `json:"type" cty:"type"`
+	TargetGroupARN *terraformWriter.Literal `json:"target_group_arn,omitempty" cty:"target_group_arn"`
 }
 
 func (_ *NetworkLoadBalancer) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *NetworkLoadBalancer) error {
@@ -816,12 +751,12 @@ func (_ *NetworkLoadBalancer) RenderTerraform(t *terraform.TerraformTarget, a, e
 	return nil
 }
 
-func (e *NetworkLoadBalancer) TerraformLink(params ...string) *terraform.Literal {
+func (e *NetworkLoadBalancer) TerraformLink(params ...string) *terraformWriter.Literal {
 	prop := "id"
 	if len(params) > 0 {
 		prop = params[0]
 	}
-	return terraform.LiteralProperty("aws_lb", *e.Name, prop)
+	return terraformWriter.LiteralProperty("aws_lb", *e.Name, prop)
 }
 
 type cloudformationNetworkLoadBalancer struct {

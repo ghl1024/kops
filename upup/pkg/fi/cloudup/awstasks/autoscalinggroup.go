@@ -29,6 +29,7 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 	"k8s.io/kops/util/pkg/maps"
 )
 
@@ -41,7 +42,7 @@ type AutoscalingGroup struct {
 	// Name is the name of the ASG
 	Name *string
 	// Lifecycle is the resource lifecycle
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	// Granularity specifys the granularity of the metrics
 	Granularity *string
@@ -142,7 +143,7 @@ func (e *AutoscalingGroup) Find(c *fi.Context) (*AutoscalingGroup, error) {
 			}
 		}
 		if apiLBTask != nil && len(actual.LoadBalancers) > 0 {
-			apiLBDesc, err := FindLoadBalancerByNameTag(c.Cloud.(awsup.AWSCloud), fi.StringValue(apiLBTask.Name))
+			apiLBDesc, err := c.Cloud.(awsup.AWSCloud).FindELBByNameTag(fi.StringValue(apiLBTask.Name))
 			if err != nil {
 				return nil, err
 			}
@@ -325,16 +326,17 @@ func (v *AutoscalingGroup) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Autos
 		klog.V(2).Infof("Creating autoscaling group with name: %s", fi.StringValue(e.Name))
 
 		request := &autoscaling.CreateAutoScalingGroupInput{
-			AutoScalingGroupName: e.Name,
-			MinSize:              e.MinSize,
-			MaxSize:              e.MaxSize,
-			Tags:                 v.AutoscalingGroupTags(),
-			VPCZoneIdentifier:    fi.String(strings.Join(e.AutoscalingGroupSubnets(), ",")),
+			AutoScalingGroupName:             e.Name,
+			MinSize:                          e.MinSize,
+			MaxSize:                          e.MaxSize,
+			NewInstancesProtectedFromScaleIn: e.InstanceProtection,
+			Tags:                             v.AutoscalingGroupTags(),
+			VPCZoneIdentifier:                fi.String(strings.Join(e.AutoscalingGroupSubnets(), ",")),
 		}
 
 		for _, k := range e.LoadBalancers {
 			if k.LoadBalancerName == nil {
-				lbDesc, err := FindLoadBalancerByNameTag(t.Cloud, fi.StringValue(k.GetName()))
+				lbDesc, err := t.Cloud.FindELBByNameTag(fi.StringValue(k.GetName()))
 				if err != nil {
 					return err
 				}
@@ -418,9 +420,6 @@ func (v *AutoscalingGroup) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Autos
 			}
 		}
 
-		if e.InstanceProtection != nil {
-			request.NewInstancesProtectedFromScaleIn = e.InstanceProtection
-		}
 	} else {
 		// @logic: else we have found a autoscaling group and we need to evaluate the difference
 		request := &autoscaling.UpdateAutoScalingGroupInput{
@@ -805,16 +804,16 @@ type terraformASGTag struct {
 
 type terraformAutoscalingLaunchTemplateSpecification struct {
 	// LaunchTemplateID is the ID of the template to use.
-	LaunchTemplateID *terraform.Literal `json:"id,omitempty" cty:"id"`
+	LaunchTemplateID *terraformWriter.Literal `json:"id,omitempty" cty:"id"`
 	// Version is the version of the Launch Template to use.
-	Version *terraform.Literal `json:"version,omitempty" cty:"version"`
+	Version *terraformWriter.Literal `json:"version,omitempty" cty:"version"`
 }
 
 type terraformAutoscalingMixedInstancesPolicyLaunchTemplateSpecification struct {
 	// LaunchTemplateID is the ID of the template to use
-	LaunchTemplateID *terraform.Literal `json:"launch_template_id,omitempty" cty:"launch_template_id"`
+	LaunchTemplateID *terraformWriter.Literal `json:"launch_template_id,omitempty" cty:"launch_template_id"`
 	// Version is the version of the Launch Template to use
-	Version *terraform.Literal `json:"version,omitempty" cty:"version"`
+	Version *terraformWriter.Literal `json:"version,omitempty" cty:"version"`
 }
 
 type terraformAutoscalingMixedInstancesPolicyLaunchTemplateOverride struct {
@@ -853,19 +852,19 @@ type terraformMixedInstancesPolicy struct {
 
 type terraformAutoscalingGroup struct {
 	Name                    *string                                          `json:"name,omitempty" cty:"name"`
-	LaunchConfigurationName *terraform.Literal                               `json:"launch_configuration,omitempty" cty:"launch_configuration"`
+	LaunchConfigurationName *terraformWriter.Literal                         `json:"launch_configuration,omitempty" cty:"launch_configuration"`
 	LaunchTemplate          *terraformAutoscalingLaunchTemplateSpecification `json:"launch_template,omitempty" cty:"launch_template"`
 	MaxSize                 *int64                                           `json:"max_size,omitempty" cty:"max_size"`
 	MinSize                 *int64                                           `json:"min_size,omitempty" cty:"min_size"`
 	MixedInstancesPolicy    []*terraformMixedInstancesPolicy                 `json:"mixed_instances_policy,omitempty" cty:"mixed_instances_policy"`
-	VPCZoneIdentifier       []*terraform.Literal                             `json:"vpc_zone_identifier,omitempty" cty:"vpc_zone_identifier"`
+	VPCZoneIdentifier       []*terraformWriter.Literal                       `json:"vpc_zone_identifier,omitempty" cty:"vpc_zone_identifier"`
 	Tags                    []*terraformASGTag                               `json:"tag,omitempty" cty:"tag"`
 	MetricsGranularity      *string                                          `json:"metrics_granularity,omitempty" cty:"metrics_granularity"`
 	EnabledMetrics          []*string                                        `json:"enabled_metrics,omitempty" cty:"enabled_metrics"`
 	SuspendedProcesses      []*string                                        `json:"suspended_processes,omitempty" cty:"suspended_processes"`
 	InstanceProtection      *bool                                            `json:"protect_from_scale_in,omitempty" cty:"protect_from_scale_in"`
-	LoadBalancers           []*terraform.Literal                             `json:"load_balancers,omitempty" cty:"load_balancers"`
-	TargetGroupARNs         []*terraform.Literal                             `json:"target_group_arns,omitempty" cty:"target_group_arns"`
+	LoadBalancers           []*terraformWriter.Literal                       `json:"load_balancers,omitempty" cty:"load_balancers"`
+	TargetGroupARNs         []*terraformWriter.Literal                       `json:"target_group_arns,omitempty" cty:"target_group_arns"`
 }
 
 // RenderTerraform is responsible for rendering the terraform codebase
@@ -895,12 +894,12 @@ func (_ *AutoscalingGroup) RenderTerraform(t *terraform.TerraformTarget, a, e, c
 	for _, k := range e.LoadBalancers {
 		tf.LoadBalancers = append(tf.LoadBalancers, k.TerraformLink())
 	}
-	terraform.SortLiterals(tf.LoadBalancers)
+	terraformWriter.SortLiterals(tf.LoadBalancers)
 
 	for _, tg := range e.TargetGroups {
 		tf.TargetGroupARNs = append(tf.TargetGroupARNs, tg.TerraformLink())
 	}
-	terraform.SortLiterals(tf.TargetGroupARNs)
+	terraformWriter.SortLiterals(tf.TargetGroupARNs)
 
 	if e.UseMixedInstancesPolicy() {
 		// Temporary warning until https://github.com/terraform-providers/terraform-provider-aws/issues/9750 is resolved
@@ -988,8 +987,8 @@ func (_ *AutoscalingGroup) RenderTerraform(t *terraform.TerraformTarget, a, e, c
 }
 
 // TerraformLink fills in the property
-func (e *AutoscalingGroup) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("aws_autoscaling_group", fi.StringValue(e.Name), "id")
+func (e *AutoscalingGroup) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("aws_autoscaling_group", fi.StringValue(e.Name), "id")
 }
 
 type cloudformationASGTag struct {

@@ -7,19 +7,19 @@ Update a cluster.
 
 ### Synopsis
 
-Create or update cloud or cluster resources to match current cluster state.  If the cluster or cloud resources already exist this command may modify those resources.
+Create or update cloud or cluster resources to match the current cluster and instance group definitions. If the cluster or cloud resources already exist this command may modify those resources.
 
- If nodes need updating such as during a Kubernetes upgrade, a rolling-update may be required as well.
+ If, such as during a Kubernetes upgrade, nodes need updating, a rolling-update may be subsequently required.
 
 ```
-kops update cluster [flags]
+kops update cluster [CLUSTER] [flags]
 ```
 
 ### Examples
 
 ```
-  # After cluster has been edited or upgraded, configure it with:
-  kops update cluster k8s-cluster.example.com --yes --state=s3://my-state-store --yes --admin
+  # After the cluster has been edited or upgraded, update the cloud resources with:
+  kops update cluster k8s-cluster.example.com --yes --state=s3://my-state-store --yes
 ```
 
 ### Options
@@ -32,10 +32,10 @@ kops update cluster [flags]
       --internal                      Use the cluster's internal DNS name. Implies --create-kube-config
       --lifecycle-overrides strings   comma separated list of phase overrides, example: SecurityGroups=Ignore,InternetGateway=ExistsAndWarnIfChanges
       --out string                    Path to write any local output
-      --phase string                  Subset of tasks to run: assets, cluster, network, security
+      --phase string                  Subset of tasks to run: cluster, network, security
       --ssh-public-key string         SSH public key to use (deprecated: use kops create secret instead)
       --target string                 Target - direct, terraform, cloudformation (default "direct")
-      --user string                   Re-use an existing user in kubeconfig. Value must specify an existing user block in your kubeconfig file.  Implies --create-kube-config
+      --user string                   Existing user in kubeconfig file to use.  Implies --create-kube-config
   -y, --yes                           Create cloud resources, without --yes update is in dry run mode
 ```
 

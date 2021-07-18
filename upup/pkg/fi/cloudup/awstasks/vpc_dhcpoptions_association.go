@@ -25,12 +25,13 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type VPCDHCPOptionsAssociation struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	VPC         *VPC
 	DHCPOptions *DHCPOptions
@@ -102,8 +103,8 @@ func (_ *VPCDHCPOptionsAssociation) RenderAWS(t *awsup.AWSAPITarget, a, e, chang
 }
 
 type terraformVPCDHCPOptionsAssociation struct {
-	VPCID         *terraform.Literal `json:"vpc_id" cty:"vpc_id"`
-	DHCPOptionsID *terraform.Literal `json:"dhcp_options_id" cty:"dhcp_options_id"`
+	VPCID         *terraformWriter.Literal `json:"vpc_id" cty:"vpc_id"`
+	DHCPOptionsID *terraformWriter.Literal `json:"dhcp_options_id" cty:"dhcp_options_id"`
 }
 
 func (_ *VPCDHCPOptionsAssociation) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *VPCDHCPOptionsAssociation) error {

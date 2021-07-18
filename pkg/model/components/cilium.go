@@ -17,7 +17,6 @@ limitations under the License.
 package components
 
 import (
-	"github.com/blang/semver/v4"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/wellknownports"
@@ -40,17 +39,52 @@ func (b *CiliumOptionsBuilder) BuildOptions(o interface{}) error {
 	}
 
 	if c.Version == "" {
-		c.Version = "v1.9.4"
+		c.Version = "v1.10.0"
 	}
 
-	version, _ := semver.ParseTolerant(c.Version)
+	if c.EnableEndpointHealthChecking == nil {
+		c.EnableEndpointHealthChecking = fi.Bool(true)
+	}
+
+	if c.IdentityAllocationMode == "" {
+		c.IdentityAllocationMode = "crd"
+	}
+
+	if c.IdentityChangeGracePeriod == "" {
+		c.IdentityChangeGracePeriod = "5s"
+	}
 
 	if c.BPFCTGlobalAnyMax == 0 {
 		c.BPFCTGlobalAnyMax = 262144
 
 	}
+
 	if c.BPFCTGlobalTCPMax == 0 {
 		c.BPFCTGlobalTCPMax = 524288
+	}
+
+	if c.BPFLBAlgorithm == "" {
+		c.BPFLBAlgorithm = "random"
+	}
+
+	if c.BPFLBMaglevTableSize == "" {
+		c.BPFLBMaglevTableSize = "16381"
+	}
+
+	if c.BPFNATGlobalMax == 0 {
+		c.BPFNATGlobalMax = 524288
+	}
+
+	if c.BPFNeighGlobalMax == 0 {
+		c.BPFNeighGlobalMax = 524288
+	}
+
+	if c.BPFPolicyMapMax == 0 {
+		c.BPFPolicyMapMax = 16384
+	}
+
+	if c.BPFLBMapMax == 0 {
+		c.BPFLBMapMax = 65536
 	}
 
 	if c.ClusterName == "" {
@@ -63,10 +97,6 @@ func (b *CiliumOptionsBuilder) BuildOptions(o interface{}) error {
 
 	if c.SidecarIstioProxyImage == "" {
 		c.SidecarIstioProxyImage = "cilium/istio_proxy"
-	}
-
-	if c.Tunnel == "" {
-		c.Tunnel = "vxlan"
 	}
 
 	if c.ToFqdnsDNSRejectResponseCode == "" {
@@ -82,15 +112,31 @@ func (b *CiliumOptionsBuilder) BuildOptions(o interface{}) error {
 	}
 
 	if c.Ipam == "" {
-		if version.Minor >= 8 {
-			c.Ipam = "kubernetes"
+		c.Ipam = "kubernetes"
+	}
+
+	if c.DisableMasquerade == nil {
+		c.DisableMasquerade = fi.Bool(c.Ipam == "eni")
+	}
+
+	if c.Tunnel == "" {
+		if c.Ipam == "eni" {
+			c.Tunnel = "disabled"
 		} else {
-			c.Ipam = "hostscope"
+			c.Tunnel = "vxlan"
 		}
 	}
 
 	if c.EnableRemoteNodeIdentity == nil {
 		c.EnableRemoteNodeIdentity = fi.Bool(true)
+	}
+
+	if c.EnableBPFMasquerade == nil {
+		c.EnableBPFMasquerade = fi.Bool(false)
+	}
+
+	if c.EnableL7Proxy == nil {
+		c.EnableL7Proxy = fi.Bool(true)
 	}
 
 	if c.CPURequest == nil {

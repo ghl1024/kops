@@ -30,7 +30,8 @@ import (
 
 func newTestPublicIPAddress() *PublicIPAddress {
 	return &PublicIPAddress{
-		Name: to.StringPtr("publicIPAddress"),
+		Name:      to.StringPtr("publicIPAddress"),
+		Lifecycle: fi.LifecycleSync,
 		ResourceGroup: &ResourceGroup{
 			Name: to.StringPtr("rg"),
 		},

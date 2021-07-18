@@ -24,6 +24,8 @@ type BootstrapRequest struct {
 	APIVersion string `json:"apiVersion"`
 	// Certs are the requested certificates and their respective public keys.
 	Certs map[string]string `json:"certs"`
+	// KeypairIDs are the keypair IDs of the CAs to use for issuing certificates.
+	KeypairIDs map[string]string `json:"keypairIDs"`
 
 	// IncludeNodeConfig controls whether the cluster & instance group configuration should be returned.
 	// This allows for nodes without access to the kops state store.
@@ -41,14 +43,11 @@ type BootstrapResponse struct {
 
 // NodeConfig holds configuration needed to boot a node (without the kops state store)
 type NodeConfig struct {
-	// InstanceGroupConfig holds the configuration for the node's instance group
-	InstanceGroupConfig string `json:"instanceGroupConfig,omitempty"`
-
-	// ClusterFullConfig holds the configuration for the cluster
+	// ClusterFullConfig holds the completed configuration for the cluster.
 	ClusterFullConfig string `json:"clusterFullConfig,omitempty"`
 
-	// Certificates holds certificates that are already issued
-	Certificates []*NodeConfigCertificate `json:"certificates,omitempty"`
+	// NodeupConfig holds the nodeup.Config for the node's instance group.
+	NodeupConfig string `json:"nodeupConfig,omitempty"`
 }
 
 // NodeConfigCertificate holds a certificate that the node needs to boot.

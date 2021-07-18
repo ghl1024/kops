@@ -18,6 +18,7 @@ package components
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/loader"
+	"k8s.io/kops/upup/pkg/fi/utils"
 )
 
 const (
@@ -116,6 +118,20 @@ func (b *KubeControllerManagerOptionsBuilder) BuildOptions(o interface{}) error 
 
 	kcm.AllocateNodeCIDRs = fi.Bool(true)
 	kcm.ConfigureCloudRoutes = fi.Bool(false)
+	if kcm.ClusterCIDR == "" {
+		kcm.ClusterCIDR = clusterSpec.PodCIDR
+	}
+
+	if utils.IsIPv6CIDR(kcm.ClusterCIDR) {
+		_, clusterNet, _ := net.ParseCIDR(kcm.ClusterCIDR)
+		clusterSize, _ := clusterNet.Mask.Size()
+		nodeSize := (128 - clusterSize) / 2
+		if nodeSize > 16 {
+			// Kubernetes limitation
+			nodeSize = 16
+		}
+		kcm.NodeCIDRMaskSize = fi.Int32(int32(clusterSize + nodeSize))
+	}
 
 	networking := clusterSpec.Networking
 	if networking == nil {
@@ -125,10 +141,6 @@ func (b *KubeControllerManagerOptionsBuilder) BuildOptions(o interface{}) error 
 	} else if networking.GCE != nil {
 		kcm.ConfigureCloudRoutes = fi.Bool(false)
 		kcm.CIDRAllocatorType = fi.String("CloudAllocator")
-
-		if kcm.ClusterCIDR == "" {
-			kcm.ClusterCIDR = clusterSpec.PodCIDR
-		}
 	} else if networking.External != nil {
 		kcm.ConfigureCloudRoutes = fi.Bool(false)
 	} else if UsesCNI(networking) {

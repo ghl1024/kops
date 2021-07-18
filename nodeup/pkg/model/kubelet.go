@@ -115,10 +115,17 @@ func (b *KubeletBuilder) Build(c *fi.ModelBuilderContext) error {
 			Mode: s("0755"),
 		})
 
-		if b.IsMaster || !b.UseBootstrapTokens() {
+		if b.HasAPIServer || !b.UseBootstrapTokens() {
 			var kubeconfig fi.Resource
-			if b.IsMaster && (b.IsKubernetesGTE("1.19") || b.UseBootstrapTokens()) {
-				kubeconfig, err = b.buildMasterKubeletKubeconfig(c)
+			if b.HasAPIServer {
+				if b.IsKubernetesGTE("1.19") || b.UseBootstrapTokens() {
+					kubeconfig, err = b.buildMasterKubeletKubeconfig(c)
+				} else {
+					kubeconfig = b.BuildIssuedKubeconfig("kubelet", nodetasks.PKIXName{
+						CommonName:   "kubelet",
+						Organization: []string{rbac.NodesGroup},
+					}, c)
+				}
 			} else {
 				kubeconfig, err = b.BuildBootstrapKubeconfig("kubelet", c)
 			}
@@ -306,10 +313,6 @@ func (b *KubeletBuilder) buildSystemdService() *nodetasks.Service {
 
 // buildKubeletConfig is responsible for creating the kubelet configuration
 func (b *KubeletBuilder) buildKubeletConfig() (*kops.KubeletConfigSpec, error) {
-	if b.InstanceGroup == nil {
-		klog.Fatalf("InstanceGroup was not set")
-	}
-
 	kubeletConfigSpec, err := b.buildKubeletConfigSpec()
 	if err != nil {
 		return nil, fmt.Errorf("error building kubelet config: %v", err)
@@ -429,7 +432,7 @@ func (b *KubeletBuilder) addContainerizedMounter(c *fi.ModelBuilderContext) erro
 // buildKubeletConfigSpec returns the kubeletconfig for the specified instanceGroup
 func (b *KubeletBuilder) buildKubeletConfigSpec() (*kops.KubeletConfigSpec, error) {
 	isMaster := b.IsMaster
-	isAPIServer := b.InstanceGroup.Spec.Role == kops.InstanceGroupRoleAPIServer
+	isAPIServer := b.BootConfig.InstanceGroupRole == kops.InstanceGroupRoleAPIServer
 
 	// Merge KubeletConfig for NodeLabels
 	c := b.NodeupConfig.KubeletConfig
@@ -524,9 +527,7 @@ func (b *KubeletBuilder) buildKubeletConfigSpec() (*kops.KubeletConfigSpec, erro
 	// As of 1.16 we can no longer set critical labels.
 	// kops-controller will set these labels.
 	// For bootstrapping reasons, protokube sets the critical labels for kops-controller to run.
-	if b.Cluster.IsKubernetesGTE("1.16") {
-		c.NodeLabels = nil
-	}
+	c.NodeLabels = nil
 
 	if c.AuthorizationMode == "" && b.Cluster.IsKubernetesGTE("1.19") {
 		c.AuthorizationMode = "Webhook"
@@ -558,15 +559,17 @@ func (b *KubeletBuilder) buildKubeletServingCertificate(c *fi.ModelBuilderContex
 	if b.UseKopsControllerForNodeBootstrap() {
 		name := "kubelet-server"
 		dir := b.PathSrvKubernetes()
-		signer := fi.CertificateIDCA
 
 		nodeName, err := b.NodeName()
 		if err != nil {
 			return err
 		}
 
-		if !b.IsMaster {
-			cert, key := b.GetBootstrapCert(name)
+		if !b.HasAPIServer {
+			cert, key, err := b.GetBootstrapCert(name, fi.CertificateIDCA)
+			if err != nil {
+				return err
+			}
 
 			c.AddTask(&nodetasks.File{
 				Path:           filepath.Join(dir, name+".crt"),
@@ -586,9 +589,10 @@ func (b *KubeletBuilder) buildKubeletServingCertificate(c *fi.ModelBuilderContex
 
 		} else {
 			issueCert := &nodetasks.IssueCert{
-				Name:   name,
-				Signer: signer,
-				Type:   "server",
+				Name:      name,
+				Signer:    fi.CertificateIDCA,
+				KeypairID: b.NodeupConfig.KeypairIDs[fi.CertificateIDCA],
+				Type:      "server",
 				Subject: nodetasks.PKIXName{
 					CommonName: nodeName,
 				},

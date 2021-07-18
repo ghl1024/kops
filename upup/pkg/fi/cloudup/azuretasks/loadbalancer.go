@@ -27,12 +27,11 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/azure"
 )
 
-//go:generate fitask -type=LoadBalancer
-
 // LoadBalancer is an Azure Cloud LoadBalancer
+// +kops:fitask
 type LoadBalancer struct {
 	Name          *string
-	Lifecycle     *fi.Lifecycle
+	Lifecycle     fi.Lifecycle
 	ResourceGroup *ResourceGroup
 	Subnet        *Subnet
 

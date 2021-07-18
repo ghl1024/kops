@@ -470,6 +470,10 @@ spec:
                     description: KubeletCgroups is the absolute name of cgroups to
                       isolate the kubelet in.
                     type: string
+                  logFormat:
+                    description: 'LogFormat is the logging format of the kubelet.
+                      Supported values: text, json. Default: text'
+                    type: string
                   logLevel:
                     description: LogLevel is the logging level of the kubelet
                     format: int32
@@ -522,6 +526,11 @@ spec:
                     description: config is the path to the config file or directory
                       of files
                     type: string
+                  podPidsLimit:
+                    description: PodPidsLimit is the maximum number of pids in any
+                      pod.
+                    format: int64
+                    type: integer
                   protectKernelDefaults:
                     description: 'Default kubelet behaviour for kernel tuning. If
                       set, kubelet errors if any of kernel tunables is different than
@@ -906,6 +915,12 @@ spec:
                 description: WarmPool configures an ASG warm pool for the instance
                   group
                 properties:
+                  enableLifecycleHook:
+                    description: EnableLifecycleHook determines if an ASG lifecycle
+                      hook will be added ensuring that nodeup runs to completion.
+                      Note that the metadata API must be protected from arbitrary
+                      Pods when this is enabled.
+                    type: boolean
                   maxSize:
                     description: MaxSize is the maximum size of the warm pool. The
                       desired size of the instance group is subtracted from this number

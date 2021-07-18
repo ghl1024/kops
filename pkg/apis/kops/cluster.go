@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/kops/pkg/apis/kops/util"
+	"k8s.io/kops/upup/pkg/fi/utils"
 )
 
 // +genclient
@@ -93,8 +94,6 @@ type ClusterSpec struct {
 	KeyStore string `json:"keyStore,omitempty"`
 	// ConfigStore is the VFS path to where the configuration (Cluster, InstanceGroups etc) is stored
 	ConfigStore string `json:"configStore,omitempty"`
-	// PublicDataStore is the VFS path to where public data is stored
-	PublicDataStore string `json:"publicDataStore,omitempty"`
 	// DNSZone is the DNS zone we should use when configuring DNS
 	// This is because some clouds let us define a managed zone foo.bar, and then have
 	// kubernetes.dev.foo.bar, without needing to define dev.foo.bar as a hosted zone.
@@ -161,8 +160,10 @@ type ClusterSpec struct {
 	ExternalDNS                    *ExternalDNSConfig            `json:"externalDns,omitempty"`
 	NTP                            *NTPConfig                    `json:"ntp,omitempty"`
 
-	// NodeTerminationHandler determines the cluster autoscaler configuration.
+	// NodeTerminationHandler determines the node termination handler configuration.
 	NodeTerminationHandler *NodeTerminationHandlerConfig `json:"nodeTerminationHandler,omitempty"`
+	// NodeProblemDetector determines the node problem detector configuration.
+	NodeProblemDetector *NodeProblemDetectorConfig `json:"nodeProblemDetector,omitempty"`
 	// MetricsServer determines the metrics server configuration.
 	MetricsServer *MetricsServerConfig `json:"metricsServer,omitempty"`
 	// CertManager determines the metrics server configuration.
@@ -201,10 +202,44 @@ type ClusterSpec struct {
 	// specified, each parameter must follow the form variable=value, the way
 	// it would appear in sysctl.conf.
 	SysctlParameters []string `json:"sysctlParameters,omitempty"`
-	// RollingUpdate defines the default rolling-update settings for instance groups
+	// RollingUpdate defines the default rolling-update settings for instance groups.
 	RollingUpdate *RollingUpdate `json:"rollingUpdate,omitempty"`
 	// ClusterAutoscaler defines the cluster autoscaler configuration.
 	ClusterAutoscaler *ClusterAutoscalerConfig `json:"clusterAutoscaler,omitempty"`
+	// WarmPool defines the default warm pool settings for instance groups (AWS only).
+	WarmPool *WarmPoolSpec `json:"warmPool,omitempty"`
+
+	// ServiceAccountIssuerDiscovery configures the OIDC Issuer for ServiceAccounts.
+	ServiceAccountIssuerDiscovery *ServiceAccountIssuerDiscoveryConfig `json:"serviceAccountIssuerDiscovery,omitempty"`
+
+	// SnapshotController defines the CSI Snapshot Controller configuration.
+	SnapshotController *SnapshotControllerConfig `json:"snapshotController,omitempty"`
+}
+
+// ServiceAccountIssuerDiscoveryConfig configures an OIDC Issuer.
+type ServiceAccountIssuerDiscoveryConfig struct {
+	// DiscoveryStore is the VFS path to where OIDC Issuer Discovery metadata is stored.
+	DiscoveryStore string `json:"discoveryStore,omitempty"`
+	// EnableAWSOIDCProvider will provision an AWS OIDC provider that trusts the ServiceAccount Issuer
+	EnableAWSOIDCProvider bool `json:"enableAWSOIDCProvider,omitempty"`
+}
+
+// ServiceAccountExternalPermissions grants a ServiceAccount permissions to external resources.
+type ServiceAccountExternalPermission struct {
+	// Name is the name of the Kubernetes ServiceAccount.
+	Name string `json:"name"`
+	// Namespace is the namespace of the Kubernetes ServiceAccount.
+	Namespace string `json:"namespace"`
+	// AWS grants permissions to AWS resources.
+	AWS *AWSPermission `json:"aws,omitempty"`
+}
+
+// AWSPermission grants permissions to AWS resources.
+type AWSPermission struct {
+	// PolicyARNs is a list of existing IAM Policies.
+	PolicyARNs []string `json:"policyARNs,omitempty"`
+	// InlinePolicy is an IAM Policy that will be attached inline to the IAM Role.
+	InlinePolicy string `json:"inlinePolicy,omitempty"`
 }
 
 // NodeAuthorizationSpec is used to node authorization
@@ -269,6 +304,8 @@ type IAMSpec struct {
 	Legacy                 bool    `json:"legacy"`
 	AllowContainerRegistry bool    `json:"allowContainerRegistry,omitempty"`
 	PermissionsBoundary    *string `json:"permissionsBoundary,omitempty"`
+	// ServiceAccountExternalPermissions defines the relatinship between Kubernetes ServiceAccounts and permissions with external resources.
+	ServiceAccountExternalPermissions []ServiceAccountExternalPermission `json:"serviceAccountExternalPermissions,omitempty"`
 }
 
 // HookSpec is a definition hook
@@ -590,8 +627,10 @@ const (
 type ClusterSubnetSpec struct {
 	// Name is the name of the subnet
 	Name string `json:"name,omitempty"`
-	// CIDR is the network cidr of the subnet
+	// CIDR is the IPv4 CIDR block assigned to the subnet.
 	CIDR string `json:"cidr,omitempty"`
+	// IPv6CIDR is the IPv6 CIDR block assigned to the subnet.
+	IPv6CIDR string `json:"ipv6CIDR,omitempty"`
 	// Zone is the zone the subnet is in, set for subnets that are zonally scoped
 	Zone string `json:"zone,omitempty"`
 	// Region is the region the subnet is in, set for subnets that are regionally scoped
@@ -757,6 +796,10 @@ func (c *Cluster) IsSharedAzureRouteTable() bool {
 	return c.Spec.CloudConfig.Azure.RouteTableName != ""
 }
 
+func (c *ClusterSpec) IsIPv6Only() bool {
+	return utils.IsIPv6CIDR(c.NonMasqueradeCIDR)
+}
+
 // EnvVar represents an environment variable present in a Container.
 type EnvVar struct {
 	// Name of the environment variable. Must be a C_IDENTIFIER.
@@ -842,4 +885,50 @@ type PackagesConfig struct {
 	UrlAmd64 *string `json:"urlAmd64,omitempty"`
 	// UrlArm64 overrides the URL for the ARM64 package.
 	UrlArm64 *string `json:"urlArm64,omitempty"`
+}
+
+type WarmPoolSpec struct {
+	// MinSize is the minimum size of the warm pool.
+	MinSize int64 `json:"minSize,omitempty"`
+	// MaxSize is the maximum size of the warm pool. The desired size of the instance group
+	// is subtracted from this number to determine the desired size of the warm pool
+	// (unless the resulting number is smaller than MinSize).
+	// The default is the instance group's MaxSize.
+	MaxSize *int64 `json:"maxSize,omitempty"`
+	// EnableLifecyleHook determines if an ASG lifecycle hook will be added ensuring that nodeup runs to completion.
+	// Note that the metadata API must be protected from arbitrary Pods when this is enabled.
+	EnableLifecycleHook bool `json:"enableLifecycleHook,omitempty"`
+}
+
+func (in *WarmPoolSpec) IsEnabled() bool {
+	return in != nil && (in.MaxSize == nil || *in.MaxSize != 0)
+}
+
+func (in *WarmPoolSpec) ResolveDefaults(ig *InstanceGroup) *WarmPoolSpec {
+	igWarmPool := ig.Spec.WarmPool
+	if igWarmPool == nil {
+		if in == nil || (ig.Spec.Role == InstanceGroupRoleMaster || ig.Spec.Role == InstanceGroupRoleBastion) {
+			var zero int64
+			return &WarmPoolSpec{
+				MaxSize: &zero,
+			}
+		}
+		return in
+	}
+
+	if in == nil || (ig.Spec.Role == InstanceGroupRoleMaster || ig.Spec.Role == InstanceGroupRoleBastion) {
+		return igWarmPool
+	}
+
+	spec := *igWarmPool
+	if spec.MaxSize == nil {
+		spec.MaxSize = in.MaxSize
+	}
+	if spec.MinSize == 0 {
+		spec.MinSize = in.MinSize
+	}
+	if !spec.EnableLifecycleHook {
+		spec.EnableLifecycleHook = in.EnableLifecycleHook
+	}
+	return &spec
 }

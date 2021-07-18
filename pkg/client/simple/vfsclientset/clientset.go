@@ -143,7 +143,8 @@ func DeleteAllClusterState(basePath vfs.Path) error {
 			continue
 		}
 
-		if relativePath == "config" || relativePath == "cluster.spec" || relativePath == registry.PathKopsVersionUpdated {
+		// "cluster.spec" was written by kOps 1.21 and earlier.
+		if relativePath == "config" || relativePath == "cluster.spec" || relativePath == "cluster-completed.spec" || relativePath == registry.PathKopsVersionUpdated {
 			continue
 		}
 		if strings.HasPrefix(relativePath, "addons/") {
@@ -159,6 +160,9 @@ func DeleteAllClusterState(basePath vfs.Path) error {
 			continue
 		}
 		if strings.HasPrefix(relativePath, "instancegroup/") {
+			continue
+		}
+		if strings.HasPrefix(relativePath, "igconfig/") {
 			continue
 		}
 		if strings.HasPrefix(relativePath, "manifests/") {
@@ -198,6 +202,25 @@ func deleteAllPaths(basePath vfs.Path) error {
 	return nil
 }
 func (c *VFSClientset) DeleteCluster(ctx context.Context, cluster *kops.Cluster) error {
+	if cluster.Spec.ServiceAccountIssuerDiscovery != nil {
+		discoveryStore := cluster.Spec.ServiceAccountIssuerDiscovery.DiscoveryStore
+		if discoveryStore != "" {
+			path, err := vfs.Context.BuildVfsPath(discoveryStore)
+			if err != nil {
+				return err
+			}
+
+			err = path.Join("openid/v1/jwks").Remove()
+			if err != nil {
+				return err
+			}
+			err = path.Join(".well-known/openid-configuration").Remove()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	secretStore := cluster.Spec.SecretStore
 	if secretStore != "" {
 		path, err := vfs.Context.BuildVfsPath(secretStore)

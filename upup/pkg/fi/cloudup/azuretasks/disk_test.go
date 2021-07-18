@@ -35,7 +35,8 @@ const (
 
 func newTestDisk() *Disk {
 	return &Disk{
-		Name: to.StringPtr("disk"),
+		Name:      to.StringPtr("disk"),
+		Lifecycle: fi.LifecycleSync,
 		ResourceGroup: &ResourceGroup{
 			Name: to.StringPtr("rg"),
 		},

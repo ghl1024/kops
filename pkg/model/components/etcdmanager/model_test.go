@@ -33,7 +33,6 @@ func Test_RunEtcdManagerBuilder(t *testing.T) {
 		"tests/minimal",
 		"tests/pollinterval",
 		"tests/proxy",
-		"tests/old_versions_mount_hosts",
 		"tests/overwrite_settings",
 	}
 	for _, basedir := range tests {
@@ -51,7 +50,7 @@ func Test_RunEtcdManagerBuilder(t *testing.T) {
 
 			builder := EtcdManagerBuilder{
 				KopsModelContext: kopsModelContext,
-				AssetBuilder:     assets.NewAssetBuilder(kopsModelContext.Cluster, ""),
+				AssetBuilder:     assets.NewAssetBuilder(kopsModelContext.Cluster, false),
 			}
 
 			if err := builder.Build(context); err != nil {

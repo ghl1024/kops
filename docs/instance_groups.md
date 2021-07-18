@@ -47,7 +47,9 @@ spec:
 
 ## instanceMetadata
 
-By default, both IMDSv1 and IMDSv2 are enabled. The instance metadata service can be configured to allow only IMDSv2.
+By default IMDSv2 are enabled as of kOps 1.22 on new clusters using Kubernetes 1.22. The default hop limit is 3 on control plane nodes, and 1 on other roles.
+
+On other versions, you can enable IMDSv2 like this:
 
 ```YAML
 spec:
@@ -234,3 +236,45 @@ https://docs.aws.amazon.com/autoscaling/ec2/APIReference/API_InstancesDistributi
 ### spotInstancePools
 Used only when the Spot allocation strategy is lowest-price.
 The number of Spot Instance pools across which to allocate your Spot Instances. The Spot pools are determined from the different instance types in the Overrides array of LaunchTemplate. Default if not set is 2.
+
+## warmPool (AWS Only)
+
+{{ kops_feature_table(kops_added_default='1.21') }}
+
+A Warm Pool contains pre-initialized EC2 instances that can join the cluster significantly faster than regular instances. These instances run the kOps configuration process, pull known container images, and then shut down. When the ASG needs to scale out it will pull instances from the warm pool if any are available.
+
+You can enable the warm pool by adding the following:
+
+```yaml
+spec:
+  warmPool: {}
+```
+
+This will use the AWS default settings. You can change the pool size like this:
+
+```yaml
+spec:
+  warmPool:
+    minSize: 3
+    maxSize: 10
+```
+
+You can also specify defaults for all instance groups of type Node or APIServer by setting the `warmPool` field in the cluster spec.
+If warm pools are enabled at the cluster spec level, you can disable them at the instance group level by setting `maxSize: 0`.
+
+### Lifecycle hook
+
+By default AWS does not guarantee that the kOps configuration will run to completion. Nor that the instance will timely shut down after completion if the instance is allowed to run that long. In order to guarantee this, a lifecycle hook is needed.
+
+**You have to ensure your metadata API is protected if you enable this. If not, any Pod in the cluster will be able to complete the lifecycle hook with the `ABANDONED` result, preventing any instance from ever joining the cluster.**
+
+The following config will enable the lifecycle hook as well as protect the metadata API from abuse:
+
+```yaml
+spec:
+  warmPool:
+    enableLifecycleHook: true
+  instanceMetadata:
+    httpPutResponseHopLimit: 1
+    httpTokens: required
+```

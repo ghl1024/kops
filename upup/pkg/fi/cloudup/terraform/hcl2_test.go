@@ -24,6 +24,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/gocty"
 	"k8s.io/kops/pkg/diff"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 func TestWriteValue(t *testing.T) {
@@ -113,17 +114,17 @@ foo {
 func TestWriteLiteral(t *testing.T) {
 	cases := []struct {
 		name     string
-		literal  *Literal
+		literal  *terraformWriter.Literal
 		expected string
 	}{
 		{
 			name:     "string",
-			literal:  &Literal{Value: "value"},
+			literal:  &terraformWriter.Literal{Value: "value"},
 			expected: `foo = "value"`,
 		},
 		{
 			name: "traversal",
-			literal: &Literal{
+			literal: &terraformWriter.Literal{
 				ResourceType: "type",
 				ResourceName: "name",
 				ResourceProp: "prop",
@@ -131,11 +132,8 @@ func TestWriteLiteral(t *testing.T) {
 			expected: "foo = type.name.prop",
 		},
 		{
-			name: "file",
-			literal: &Literal{
-				FilePath: "${path.module}/foo",
-				FileFn:   fileFnFile,
-			},
+			name:     "file",
+			literal:  terraformWriter.LiteralFunctionExpression("file", []string{"\"${path.module}/foo\""}),
 			expected: `foo = file("${path.module}/foo")`,
 		},
 	}
@@ -155,7 +153,7 @@ func TestWriteLiteral(t *testing.T) {
 func TestWriteLiteralList(t *testing.T) {
 	cases := []struct {
 		name     string
-		literals []*Literal
+		literals []*terraformWriter.Literal
 		expected string
 	}{
 		{
@@ -164,7 +162,7 @@ func TestWriteLiteralList(t *testing.T) {
 		},
 		{
 			name: "one literal",
-			literals: []*Literal{
+			literals: []*terraformWriter.Literal{
 				{
 					ResourceType: "type",
 					ResourceName: "name",
@@ -175,7 +173,7 @@ func TestWriteLiteralList(t *testing.T) {
 		},
 		{
 			name: "two literals",
-			literals: []*Literal{
+			literals: []*terraformWriter.Literal{
 				{
 					ResourceType: "type1",
 					ResourceName: "name1",
@@ -191,7 +189,7 @@ func TestWriteLiteralList(t *testing.T) {
 		},
 		{
 			name: "one traversal literal, one string literal",
-			literals: []*Literal{
+			literals: []*terraformWriter.Literal{
 				{
 					ResourceType: "type",
 					ResourceName: "name",
@@ -268,19 +266,21 @@ tags = {
 func TestWriteMapLiterals(t *testing.T) {
 	cases := []struct {
 		name     string
-		values   map[string]Literal
+		values   map[string]terraformWriter.Literal
 		expected string
 	}{
 		{
 			name: "literal values",
-			values: map[string]Literal{
-				"key1": {FilePath: "${module.path}/path/to/value1", FileFn: fileFnFile},
-				"key2": {FilePath: "${module.path}/path/to/value2", FileFn: fileFnFileBase64},
+			values: map[string]terraformWriter.Literal{
+				"key1": *terraformWriter.LiteralFunctionExpression("file", []string{"\"${module.path}/path/to/value1\""}),
+				"key2": *terraformWriter.LiteralFunctionExpression("filebase64", []string{"\"${module.path}/path/to/value2\""}),
+				"key3": *terraformWriter.LiteralFunctionExpression("cidrsubnet", []string{"\"172.16.0.0/12\"", "4", "2"}),
 			},
 			expected: `
 metadata = {
   "key1" = file("${module.path}/path/to/value1")
   "key2" = filebase64("${module.path}/path/to/value2")
+  "key3" = cidrsubnet("172.16.0.0/12", 4, 2)
 }
 			`,
 		},

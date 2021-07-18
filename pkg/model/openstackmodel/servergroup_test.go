@@ -948,6 +948,45 @@ func getServerGroupModelBuilderTestInput() []serverGroupModelBuilderTestInput {
 				},
 			},
 		},
+		{
+			desc: "configures server group affinity with annotations",
+			cluster: &kops.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster",
+				},
+				Spec: kops.ClusterSpec{
+					MasterPublicName: "master-public-name",
+					CloudConfig: &kops.CloudConfiguration{
+						Openstack: &kops.OpenstackConfiguration{},
+					},
+					Subnets: []kops.ClusterSubnetSpec{
+						{
+							Name:   "subnet",
+							Region: "region",
+						},
+					},
+				},
+			},
+			instanceGroups: []*kops.InstanceGroup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node",
+						Annotations: map[string]string{
+							"openstack.kops.io/serverGroupAffinity": "soft-anti-affinity",
+						},
+					},
+					Spec: kops.InstanceGroupSpec{
+						Role:        kops.InstanceGroupRoleNode,
+						Image:       "image-node",
+						MinSize:     i32(1),
+						MaxSize:     i32(1),
+						MachineType: "blc.2-4",
+						Subnets:     []string{"subnet"},
+						Zones:       []string{"zone-1"},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -966,15 +1005,15 @@ func createBuilderForCluster(cluster *kops.Cluster, instanceGroups []*kops.Insta
 	return &ServerGroupModelBuilder{
 		OpenstackModelContext:  openstackModelContext,
 		BootstrapScriptBuilder: bootstrapScriptBuilder,
-		Lifecycle:              &clusterLifecycle,
+		Lifecycle:              clusterLifecycle,
 	}
 }
 
 type nodeupConfigBuilder struct {
 }
 
-func (n *nodeupConfigBuilder) BuildConfig(ig *kops.InstanceGroup, apiserverAdditionalIPs []string, ca fi.Resource) (*nodeup.Config, error) {
-	return &nodeup.Config{}, nil
+func (n *nodeupConfigBuilder) BuildConfig(ig *kops.InstanceGroup, apiserverAdditionalIPs []string, caTasks map[string]*fitasks.Keypair) (*nodeup.Config, *nodeup.BootConfig, error) {
+	return &nodeup.Config{}, &nodeup.BootConfig{}, nil
 }
 
 func TestServerGroupBuilder(t *testing.T) {
@@ -992,7 +1031,14 @@ func RunGoldenTest(t *testing.T, basedir string, testCase serverGroupModelBuilde
 	testutils.SetupMockOpenstack()
 
 	clusterLifecycle := fi.LifecycleSync
+	if testCase.cluster.Spec.Networking == nil {
+		testCase.cluster.Spec.Networking = &kops.NetworkingSpec{}
+	}
 	bootstrapScriptBuilder := &model.BootstrapScriptBuilder{
+		KopsModelContext: &model.KopsModelContext{
+			IAMModelContext: iam.IAMModelContext{Cluster: testCase.cluster},
+			InstanceGroups:  testCase.instanceGroups,
+		},
 		NodeUpConfigBuilder: &nodeupConfigBuilder{},
 		NodeUpAssets: map[architectures.Architecture]*mirrors.MirroredAsset{
 			architectures.ArchitectureAmd64: {
@@ -1004,6 +1050,7 @@ func RunGoldenTest(t *testing.T, basedir string, testCase serverGroupModelBuilde
 				Hash:      hashing.MustFromString("e525c28a65ff0ce4f95f9e730195b4e67fdcb15ceb1f36b5ad6921a8a4490c71"),
 			},
 		},
+		Cluster: testCase.cluster,
 	}
 
 	builder := createBuilderForCluster(testCase.cluster, testCase.instanceGroups, clusterLifecycle, bootstrapScriptBuilder)
@@ -1013,13 +1060,29 @@ func RunGoldenTest(t *testing.T, basedir string, testCase serverGroupModelBuilde
 		LifecycleOverrides: map[string]fi.Lifecycle{},
 	}
 
-	// We need the CA for the bootstrap script
+	// We need the CA and service-account for the bootstrap script
 	caTask := &fitasks.Keypair{
 		Name:    fi.String(fi.CertificateIDCA),
 		Subject: "cn=kubernetes",
 		Type:    "ca",
 	}
 	context.AddTask(caTask)
+	for _, keypair := range []string{
+		"apiserver-aggregator-ca",
+		"etcd-clients-ca",
+		"etcd-manager-ca-events",
+		"etcd-manager-ca-main",
+		"etcd-peers-ca-events",
+		"etcd-peers-ca-main",
+		"service-account",
+	} {
+		task := &fitasks.Keypair{
+			Name:    fi.String(keypair),
+			Subject: "cn=" + keypair,
+			Type:    "ca",
+		}
+		context.AddTask(task)
+	}
 
 	if err := builder.Build(context); err != nil {
 		t.Fatalf("error from Build: %v", err)

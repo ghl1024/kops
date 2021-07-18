@@ -21,16 +21,16 @@ import (
 
 	"k8s.io/klog/v2"
 	"k8s.io/kops/pkg/apis/kops"
-	"k8s.io/kops/pkg/model"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
+	"k8s.io/kops/upup/pkg/fi/utils"
 )
 
 // ExternalAccessModelBuilder configures security group rules for external access
 // (SSHAccess, KubernetesAPIAccess)
 type ExternalAccessModelBuilder struct {
-	*model.KopsModelContext
-	Lifecycle *fi.Lifecycle
+	*AWSModelContext
+	Lifecycle fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &ExternalAccessModelBuilder{}
@@ -70,9 +70,13 @@ func (b *ExternalAccessModelBuilder) Build(c *fi.ModelBuilderContext) error {
 					Protocol:      fi.String("tcp"),
 					FromPort:      fi.Int64(22),
 					ToPort:        fi.Int64(22),
-					CIDR:          fi.String(sshAccess),
 				}
-				b.AddDirectionalGroupRule(c, t)
+				if utils.IsIPv6CIDR(sshAccess) {
+					t.IPv6CIDR = fi.String(sshAccess)
+				} else {
+					t.CIDR = fi.String(sshAccess)
+				}
+				AddDirectionalGroupRule(c, t)
 			}
 
 			for _, nodeGroup := range nodeGroups {
@@ -84,9 +88,13 @@ func (b *ExternalAccessModelBuilder) Build(c *fi.ModelBuilderContext) error {
 					Protocol:      fi.String("tcp"),
 					FromPort:      fi.Int64(22),
 					ToPort:        fi.Int64(22),
-					CIDR:          fi.String(sshAccess),
 				}
-				b.AddDirectionalGroupRule(c, t)
+				if utils.IsIPv6CIDR(sshAccess) {
+					t.IPv6CIDR = fi.String(sshAccess)
+				} else {
+					t.CIDR = fi.String(sshAccess)
+				}
+				AddDirectionalGroupRule(c, t)
 			}
 		}
 	}
@@ -99,27 +107,38 @@ func (b *ExternalAccessModelBuilder) Build(c *fi.ModelBuilderContext) error {
 
 		for _, nodeGroup := range nodeGroups {
 			suffix := nodeGroup.Suffix
-			t1 := &awstasks.SecurityGroupRule{
-				Name:          fi.String(fmt.Sprintf("nodeport-tcp-external-to-node-%s%s", nodePortAccess, suffix)),
-				Lifecycle:     b.Lifecycle,
-				SecurityGroup: nodeGroup.Task,
-				Protocol:      fi.String("tcp"),
-				FromPort:      fi.Int64(int64(nodePortRange.Base)),
-				ToPort:        fi.Int64(int64(nodePortRange.Base + nodePortRange.Size - 1)),
-				CIDR:          fi.String(nodePortAccess),
+			{
+				t := &awstasks.SecurityGroupRule{
+					Name:          fi.String(fmt.Sprintf("nodeport-tcp-external-to-node-%s%s", nodePortAccess, suffix)),
+					Lifecycle:     b.Lifecycle,
+					SecurityGroup: nodeGroup.Task,
+					Protocol:      fi.String("tcp"),
+					FromPort:      fi.Int64(int64(nodePortRange.Base)),
+					ToPort:        fi.Int64(int64(nodePortRange.Base + nodePortRange.Size - 1)),
+				}
+				if utils.IsIPv6CIDR(nodePortAccess) {
+					t.IPv6CIDR = fi.String(nodePortAccess)
+				} else {
+					t.CIDR = fi.String(nodePortAccess)
+				}
+				c.AddTask(t)
 			}
-			c.AddTask(t1)
-
-			t2 := &awstasks.SecurityGroupRule{
-				Name:          fi.String(fmt.Sprintf("nodeport-udp-external-to-node-%s%s", nodePortAccess, suffix)),
-				Lifecycle:     b.Lifecycle,
-				SecurityGroup: nodeGroup.Task,
-				Protocol:      fi.String("udp"),
-				FromPort:      fi.Int64(int64(nodePortRange.Base)),
-				ToPort:        fi.Int64(int64(nodePortRange.Base + nodePortRange.Size - 1)),
-				CIDR:          fi.String(nodePortAccess),
+			{
+				t := &awstasks.SecurityGroupRule{
+					Name:          fi.String(fmt.Sprintf("nodeport-udp-external-to-node-%s%s", nodePortAccess, suffix)),
+					Lifecycle:     b.Lifecycle,
+					SecurityGroup: nodeGroup.Task,
+					Protocol:      fi.String("udp"),
+					FromPort:      fi.Int64(int64(nodePortRange.Base)),
+					ToPort:        fi.Int64(int64(nodePortRange.Base + nodePortRange.Size - 1)),
+				}
+				if utils.IsIPv6CIDR(nodePortAccess) {
+					t.IPv6CIDR = fi.String(nodePortAccess)
+				} else {
+					t.CIDR = fi.String(nodePortAccess)
+				}
+				c.AddTask(t)
 			}
-			c.AddTask(t2)
 		}
 	}
 
@@ -139,9 +158,13 @@ func (b *ExternalAccessModelBuilder) Build(c *fi.ModelBuilderContext) error {
 					Protocol:      fi.String("tcp"),
 					FromPort:      fi.Int64(443),
 					ToPort:        fi.Int64(443),
-					CIDR:          fi.String(apiAccess),
 				}
-				b.AddDirectionalGroupRule(c, t)
+				if utils.IsIPv6CIDR(apiAccess) {
+					t.IPv6CIDR = fi.String(apiAccess)
+				} else {
+					t.CIDR = fi.String(apiAccess)
+				}
+				AddDirectionalGroupRule(c, t)
 			}
 		}
 	}

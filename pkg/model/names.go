@@ -86,8 +86,8 @@ func (b *KopsModelContext) LinkToELBSecurityGroup(prefix string) *awstasks.Secur
 // LBName32 will attempt to calculate a meaningful name for an ELB given a prefix
 // Will never return a string longer than 32 chars
 // Note this is _not_ the primary identifier for the ELB - we use the Name tag for that.
-func (m *KopsModelContext) LBName32(prefix string) string {
-	return awsup.GetResourceName32(m.Cluster.ObjectMeta.Name, prefix)
+func (b *KopsModelContext) LBName32(prefix string) string {
+	return awsup.GetResourceName32(b.Cluster.ObjectMeta.Name, prefix)
 }
 
 // CLBName returns CLB name plus cluster name
@@ -123,6 +123,10 @@ func (b *KopsModelContext) LinkToVPC() *awstasks.VPC {
 	return &awstasks.VPC{Name: &name}
 }
 
+func (b *KopsModelContext) LinkToAmazonVPCIPv6CIDR() *awstasks.VPCAmazonIPv6CIDRBlock {
+	return &awstasks.VPCAmazonIPv6CIDRBlock{Name: fi.String("AmazonIPv6")}
+}
+
 func (b *KopsModelContext) LinkToDNSZone() *awstasks.DNSZone {
 	name := b.NameForDNSZone()
 	return &awstasks.DNSZone{Name: &name}
@@ -153,8 +157,8 @@ func (b *KopsModelContext) IAMName(role kops.InstanceGroupRole) string {
 
 var roleNamRegExp = regexp.MustCompile(`([^/]+$)`)
 
-// findCustomAuthNameFromArn parses the name of a instance profile from the arn
-func findCustomAuthNameFromArn(arn string) (string, error) {
+// FindCustomAuthNameFromArn parses the name of a instance profile from the arn
+func FindCustomAuthNameFromArn(arn string) (string, error) {
 	if arn == "" {
 		return "", fmt.Errorf("unable to parse role arn as it is not set")
 	}
@@ -168,7 +172,7 @@ func findCustomAuthNameFromArn(arn string) (string, error) {
 
 func (b *KopsModelContext) LinkToIAMInstanceProfile(ig *kops.InstanceGroup) (*awstasks.IAMInstanceProfile, error) {
 	if ig.Spec.IAM != nil && ig.Spec.IAM.Profile != nil {
-		name, err := findCustomAuthNameFromArn(fi.StringValue(ig.Spec.IAM.Profile))
+		name, err := FindCustomAuthNameFromArn(fi.StringValue(ig.Spec.IAM.Profile))
 		return &awstasks.IAMInstanceProfile{Name: &name}, err
 	}
 	name := b.IAMName(ig.Spec.Role)
@@ -177,19 +181,19 @@ func (b *KopsModelContext) LinkToIAMInstanceProfile(ig *kops.InstanceGroup) (*aw
 
 // SSHKeyName computes a unique SSH key name, combining the cluster name and the SSH public key fingerprint.
 // If an SSH key name is provided in the cluster configuration, it will use that instead.
-func (c *KopsModelContext) SSHKeyName() (string, error) {
+func (b *KopsModelContext) SSHKeyName() (string, error) {
 	// use configured SSH key name if present
-	sshKeyName := c.Cluster.Spec.SSHKeyName
+	sshKeyName := b.Cluster.Spec.SSHKeyName
 	if sshKeyName != nil && *sshKeyName != "" {
 		return *sshKeyName, nil
 	}
 
-	fingerprint, err := pki.ComputeOpenSSHKeyFingerprint(string(c.SSHPublicKeys[0]))
+	fingerprint, err := pki.ComputeOpenSSHKeyFingerprint(string(b.SSHPublicKeys[0]))
 	if err != nil {
 		return "", err
 	}
 
-	name := "kubernetes." + c.Cluster.ObjectMeta.Name + "-" + fingerprint
+	name := "kubernetes." + b.Cluster.ObjectMeta.Name + "-" + fingerprint
 	return name, nil
 }
 
@@ -259,9 +263,14 @@ func (b *KopsModelContext) NamePrivateRouteTableInZone(zoneName string) string {
 }
 
 func (b *KopsModelContext) LinkToPrivateRouteTableInZone(zoneName string) *awstasks.RouteTable {
-	return &awstasks.RouteTable{Name: s(b.NamePrivateRouteTableInZone(zoneName))}
+	return &awstasks.RouteTable{Name: fi.String(b.NamePrivateRouteTableInZone(zoneName))}
 }
 
 func (b *KopsModelContext) InstanceName(ig *kops.InstanceGroup, suffix string) string {
 	return b.AutoscalingGroupName(ig) + suffix
+}
+
+func QueueNamePrefix(clusterName string) string {
+	// periods aren't allowed in queue name
+	return strings.ReplaceAll(clusterName, ".", "-")
 }

@@ -129,12 +129,29 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 	c.LogLevel = 2
 	c.SecurePort = 443
 
-	c.BindAddress = "0.0.0.0"
+	if clusterSpec.IsIPv6Only() {
+		c.BindAddress = "::"
+	} else {
+		c.BindAddress = "0.0.0.0"
+	}
 
 	c.AllowPrivileged = fi.Bool(true)
 	c.ServiceClusterIPRange = clusterSpec.ServiceClusterIPRange
-	c.EtcdServers = []string{"http://127.0.0.1:4001"}
-	c.EtcdServersOverrides = []string{"/events#http://127.0.0.1:4002"}
+	c.EtcdServers = nil
+	c.EtcdServersOverrides = nil
+
+	for _, etcdCluster := range clusterSpec.EtcdClusters {
+		protocol := "http"
+		if etcdCluster.EnableEtcdTLS {
+			protocol = "https"
+		}
+		switch etcdCluster.Name {
+		case "main":
+			c.EtcdServers = append(c.EtcdServers, protocol+"://127.0.0.1:4001")
+		case "events":
+			c.EtcdServersOverrides = append(c.EtcdServersOverrides, "/events#"+protocol+"://127.0.0.1:4002")
+		}
+	}
 
 	// TODO: We can probably rewrite these more clearly in descending order
 	// Based on recommendations from:
@@ -158,15 +175,9 @@ func (b *KubeAPIServerOptionsBuilder) BuildOptions(o interface{}) error {
 	// We make sure to disable AnonymousAuth
 	c.AnonymousAuth = fi.Bool(false)
 
-	if b.IsKubernetesGTE("1.17") {
-		// We query via the kube-apiserver-healthcheck proxy, which listens on port 3990
-		c.InsecureBindAddress = ""
-		c.InsecurePort = 0
-	} else {
-		// Older versions of kubernetes continue to rely on the insecure port: kubernetes issue #43784
-		c.InsecureBindAddress = "127.0.0.1"
-		c.InsecurePort = 8080
-	}
+	// We query via the kube-apiserver-healthcheck proxy, which listens on port 3990
+	c.InsecureBindAddress = ""
+	c.InsecurePort = 0
 
 	return nil
 }

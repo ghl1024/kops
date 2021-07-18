@@ -28,12 +28,13 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type DHCPOptions struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	ID                *string
 	DomainName        *string
@@ -189,8 +190,8 @@ func (_ *DHCPOptions) RenderTerraform(t *terraform.TerraformTarget, a, e, change
 	return t.RenderResource("aws_vpc_dhcp_options", *e.Name, tf)
 }
 
-func (e *DHCPOptions) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("aws_vpc_dhcp_options", *e.Name, "id")
+func (e *DHCPOptions) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("aws_vpc_dhcp_options", *e.Name, "id")
 }
 
 type cloudformationDHCPOptions struct {

@@ -25,8 +25,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/aws/aws-sdk-go/service/elb"
-	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/spotinst/spotinst-sdk-go/service/elastigroup/providers/aws"
 	"github.com/spotinst/spotinst-sdk-go/spotinst/client"
 	"github.com/spotinst/spotinst-sdk-go/spotinst/util/stringutil"
@@ -37,13 +35,14 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 	"k8s.io/kops/upup/pkg/fi/utils"
 )
 
 // +kops:fitask
 type Elastigroup struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	ID                       *string
 	Region                   *string
@@ -62,7 +61,8 @@ type Elastigroup struct {
 	OnDemandInstanceType     *string
 	SpotInstanceTypes        []string
 	IAMInstanceProfile       *awstasks.IAMInstanceProfile
-	LoadBalancer             *awstasks.ClassicLoadBalancer
+	LoadBalancers            []*awstasks.ClassicLoadBalancer
+	TargetGroups             []*awstasks.TargetGroup
 	SSHKey                   *awstasks.SSHKey
 	Subnets                  []*awstasks.Subnet
 	SecurityGroups           []*awstasks.SecurityGroup
@@ -126,8 +126,16 @@ func (e *Elastigroup) GetDependencies(tasks map[string]fi.Task) []fi.Task {
 		deps = append(deps, e.IAMInstanceProfile)
 	}
 
-	if e.LoadBalancer != nil {
-		deps = append(deps, e.LoadBalancer)
+	if e.LoadBalancers != nil {
+		for _, lb := range e.LoadBalancers {
+			deps = append(deps, lb)
+		}
+	}
+
+	if e.TargetGroups != nil {
+		for _, tg := range e.TargetGroups {
+			deps = append(deps, tg)
+		}
 	}
 
 	if e.SSHKey != nil {
@@ -342,33 +350,42 @@ func (e *Elastigroup) Find(c *fi.Context) (*Elastigroup, error) {
 			actual.AssociatePublicIP = fi.Bool(associatePublicIP)
 		}
 
-		// Load balancer.
+		// Load balancers.
 		{
-			if lc.LoadBalancersConfig != nil && len(lc.LoadBalancersConfig.LoadBalancers) > 0 {
-				lbs := lc.LoadBalancersConfig.LoadBalancers
-				actual.LoadBalancer = &awstasks.ClassicLoadBalancer{Name: lbs[0].Name}
+			if conf := lc.LoadBalancersConfig; conf != nil && len(conf.LoadBalancers) > 0 {
+				for _, lb := range conf.LoadBalancers {
+					switch fi.StringValue(lb.Type) {
+					case "CLASSIC":
+						actual.LoadBalancers = append(actual.LoadBalancers,
+							&awstasks.ClassicLoadBalancer{
+								Name: lb.Name,
+							})
+					case "TARGET_GROUP":
+						actual.TargetGroups = append(actual.TargetGroups,
+							&awstasks.TargetGroup{
+								ARN: lb.Arn,
+							})
+					}
+				}
 
-				if e.LoadBalancer != nil && actual.LoadBalancer != nil &&
-					fi.StringValue(actual.LoadBalancer.Name) != fi.StringValue(e.LoadBalancer.Name) {
-
-					//TODO: Verify NLB Functionality
-					nlb, err := awstasks.FindNetworkLoadBalancerByNameTag(cloud, fi.StringValue(e.LoadBalancer.Name))
+				var apiLBTask *awstasks.ClassicLoadBalancer
+				for _, elb := range e.LoadBalancers {
+					if !fi.BoolValue(elb.Shared) {
+						apiLBTask = elb
+					}
+				}
+				if apiLBTask != nil && len(actual.LoadBalancers) > 0 {
+					apiLBDesc, err := cloud.FindELBByNameTag(fi.StringValue(apiLBTask.Name))
 					if err != nil {
 						return nil, err
 					}
-					if fi.StringValue(nlb.LoadBalancerName) == fi.StringValue(lbs[0].Name) {
-						actual.LoadBalancer = e.LoadBalancer
-					}
-
-					elb, err := awstasks.FindLoadBalancerByNameTag(cloud, fi.StringValue(e.LoadBalancer.Name))
-					if err != nil {
-						return nil, err
-					}
-					if elb != nil && nlb != nil {
-						return nil, fmt.Errorf("found both elb and nlb:")
-					}
-					if fi.StringValue(elb.LoadBalancerName) == fi.StringValue(lbs[0].Name) {
-						actual.LoadBalancer = e.LoadBalancer
+					if apiLBDesc != nil {
+						for i := 0; i < len(actual.LoadBalancers); i++ {
+							lb := actual.LoadBalancers[i]
+							if fi.StringValue(apiLBDesc.LoadBalancerName) == fi.StringValue(lb.Name) {
+								actual.LoadBalancers[i] = apiLBTask
+							}
+						}
 					}
 				}
 			}
@@ -633,44 +650,34 @@ func (_ *Elastigroup) create(cloud awsup.AWSCloud, a, e, changes *Elastigroup) e
 				}
 			}
 
-			// Load balancer.
+			// Load balancers.
 			{
-				if e.LoadBalancer != nil {
-					elb, err := awstasks.FindLoadBalancerByNameTag(cloud, fi.StringValue(e.LoadBalancer.Name))
+				if len(e.LoadBalancers) > 0 {
+					lbs, err := e.buildLoadBalancers(cloud)
 					if err != nil {
 						return err
 					}
-					if elb != nil {
-						lb := new(aws.LoadBalancer)
-						lb.SetName(elb.LoadBalancerName)
-						lb.SetType(fi.String("CLASSIC"))
 
-						cfg := new(aws.LoadBalancersConfig)
-						cfg.SetLoadBalancers([]*aws.LoadBalancer{lb})
-
-						group.Compute.LaunchSpecification.SetLoadBalancersConfig(cfg)
+					if group.Compute.LaunchSpecification.LoadBalancersConfig == nil {
+						group.Compute.LaunchSpecification.LoadBalancersConfig = new(aws.LoadBalancersConfig)
 					}
 
-					//TODO: Verify using NLB functionality
-					//TODO: Consider using DNSTarget Interface and adding .getLoadBalancerName() .getLoadBalancerArn
-					nlb, err := awstasks.FindNetworkLoadBalancerByNameTag(cloud, fi.StringValue(e.LoadBalancer.Name))
-					if err != nil {
-						return err
-					}
-					if elb != nil && nlb != nil {
-						return fmt.Errorf("found both elb and nlb:")
-					}
-					if nlb != nil {
-						lb := new(aws.LoadBalancer)
-						lb.SetName(nlb.LoadBalancerName)
-						//lb.SetArn(nlb.LoadBalancerArn)
-						lb.SetType(fi.String("NETWORK"))
+					group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers =
+						append(group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers, lbs...)
+				}
+			}
 
-						cfg := new(aws.LoadBalancersConfig)
-						cfg.SetLoadBalancers([]*aws.LoadBalancer{lb})
+			// Target groups.
+			{
+				if len(e.TargetGroups) > 0 {
+					tgs := e.buildTargetGroups()
 
-						group.Compute.LaunchSpecification.SetLoadBalancersConfig(cfg)
+					if group.Compute.LaunchSpecification.LoadBalancersConfig == nil {
+						group.Compute.LaunchSpecification.LoadBalancersConfig = new(aws.LoadBalancersConfig)
 					}
+
+					group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers =
+						append(group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers, tgs...)
 				}
 			}
 
@@ -780,10 +787,6 @@ readyLoop:
 	}
 
 	return nil
-}
-
-func isNil(v interface{}) bool {
-	return v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr && reflect.ValueOf(v).IsNil())
 }
 
 func (_ *Elastigroup) update(cloud awsup.AWSCloud, a, e, changes *Elastigroup) error {
@@ -1147,52 +1150,52 @@ func (_ *Elastigroup) update(cloud awsup.AWSCloud, a, e, changes *Elastigroup) e
 				}
 			}
 
-			// Load balancer.
+			// Load balancers.
 			{
-				if changes.LoadBalancer != nil {
-
-					//TODO: Verify using NLB functionality
-					var loadBalancerType string
-					var LoadBalancerName *string
-
-					var loadBalancer interface{}
-					loadBalancer, err = awstasks.FindLoadBalancerByNameTag(cloud, fi.StringValue(e.LoadBalancer.Name))
+				if len(changes.LoadBalancers) > 0 {
+					lbs, err := e.buildLoadBalancers(cloud)
 					if err != nil {
-						return fmt.Errorf("error looking for AWS ELB: %v", err)
-					}
-					if !isNil(loadBalancer) {
-						loadBalancerType = "CLASSIC"
-						LoadBalancerName = loadBalancer.(*elb.LoadBalancerDescription).LoadBalancerName
-					} else {
-						loadBalancer, err = awstasks.FindNetworkLoadBalancerByNameTag(cloud, fi.StringValue(e.LoadBalancer.Name))
-						if err != nil {
-							return fmt.Errorf("error looking for AWS NLB: %v", err)
-						}
-						if !isNil(loadBalancer) {
-							loadBalancerType = "NETWORK"
-							LoadBalancerName = loadBalancer.(*elbv2.LoadBalancer).LoadBalancerName
-						}
+						return err
 					}
 
-					if !isNil(loadBalancer) {
-						lb := new(aws.LoadBalancer)
-						lb.SetName(LoadBalancerName)
-						lb.SetType(fi.String(loadBalancerType))
-
-						cfg := new(aws.LoadBalancersConfig)
-						cfg.SetLoadBalancers([]*aws.LoadBalancer{lb})
-
-						if group.Compute == nil {
-							group.Compute = new(aws.Compute)
-						}
-						if group.Compute.LaunchSpecification == nil {
-							group.Compute.LaunchSpecification = new(aws.LaunchSpecification)
-						}
-
-						group.Compute.LaunchSpecification.SetLoadBalancersConfig(cfg)
-						changes.LoadBalancer = nil
-						changed = true
+					if group.Compute == nil {
+						group.Compute = new(aws.Compute)
 					}
+					if group.Compute.LaunchSpecification == nil {
+						group.Compute.LaunchSpecification = new(aws.LaunchSpecification)
+					}
+					if group.Compute.LaunchSpecification.LoadBalancersConfig == nil {
+						group.Compute.LaunchSpecification.LoadBalancersConfig = new(aws.LoadBalancersConfig)
+					}
+
+					group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers =
+						append(group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers, lbs...)
+
+					changes.LoadBalancers = nil
+					changed = true
+				}
+			}
+
+			// Target groups.
+			{
+				if len(changes.TargetGroups) > 0 {
+					tgs := e.buildTargetGroups()
+
+					if group.Compute == nil {
+						group.Compute = new(aws.Compute)
+					}
+					if group.Compute.LaunchSpecification == nil {
+						group.Compute.LaunchSpecification = new(aws.LaunchSpecification)
+					}
+					if group.Compute.LaunchSpecification.LoadBalancersConfig == nil {
+						group.Compute.LaunchSpecification.LoadBalancersConfig = new(aws.LoadBalancersConfig)
+					}
+
+					group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers =
+						append(group.Compute.LaunchSpecification.LoadBalancersConfig.LoadBalancers, tgs...)
+
+					changes.TargetGroups = nil
+					changed = true
 				}
 			}
 
@@ -1341,8 +1344,9 @@ type terraformElastigroup struct {
 	Description          *string                                 `json:"description,omitempty" cty:"description"`
 	Product              *string                                 `json:"product,omitempty" cty:"product"`
 	Region               *string                                 `json:"region,omitempty" cty:"region"`
-	SubnetIDs            []*terraform.Literal                    `json:"subnet_ids,omitempty" cty:"subnet_ids"`
-	LoadBalancers        []*terraform.Literal                    `json:"elastic_load_balancers,omitempty" cty:"elastic_load_balancers"`
+	SubnetIDs            []*terraformWriter.Literal              `json:"subnet_ids,omitempty" cty:"subnet_ids"`
+	LoadBalancers        []*terraformWriter.Literal              `json:"elastic_load_balancers,omitempty" cty:"elastic_load_balancers"`
+	TargetGroups         []*terraformWriter.Literal              `json:"target_group_arns,omitempty" cty:"target_group_arns"`
 	NetworkInterfaces    []*terraformElastigroupNetworkInterface `json:"network_interface,omitempty" cty:"network_interface"`
 	RootBlockDevice      *terraformElastigroupBlockDevice        `json:"ebs_block_device,omitempty" cty:"ebs_block_device"`
 	EphemeralBlockDevice []*terraformElastigroupBlockDevice      `json:"ephemeral_block_device,omitempty" cty:"ephemeral_block_device"`
@@ -1363,14 +1367,14 @@ type terraformElastigroup struct {
 	OnDemand *string  `json:"instance_types_ondemand,omitempty" cty:"instance_types_ondemand"`
 	Spot     []string `json:"instance_types_spot,omitempty" cty:"instance_types_spot"`
 
-	Monitoring         *bool                `json:"enable_monitoring,omitempty" cty:"enable_monitoring"`
-	EBSOptimized       *bool                `json:"ebs_optimized,omitempty" cty:"ebs_optimized"`
-	ImageID            *string              `json:"image_id,omitempty" cty:"image_id"`
-	HealthCheckType    *string              `json:"health_check_type,omitempty" cty:"health_check_type"`
-	SecurityGroups     []*terraform.Literal `json:"security_groups,omitempty" cty:"security_groups"`
-	UserData           *terraform.Literal   `json:"user_data,omitempty" cty:"user_data"`
-	IAMInstanceProfile *terraform.Literal   `json:"iam_instance_profile,omitempty" cty:"iam_instance_profile"`
-	KeyName            *terraform.Literal   `json:"key_name,omitempty" cty:"key_name"`
+	Monitoring         *bool                      `json:"enable_monitoring,omitempty" cty:"enable_monitoring"`
+	EBSOptimized       *bool                      `json:"ebs_optimized,omitempty" cty:"ebs_optimized"`
+	ImageID            *string                    `json:"image_id,omitempty" cty:"image_id"`
+	HealthCheckType    *string                    `json:"health_check_type,omitempty" cty:"health_check_type"`
+	SecurityGroups     []*terraformWriter.Literal `json:"security_groups,omitempty" cty:"security_groups"`
+	UserData           *terraformWriter.Literal   `json:"user_data,omitempty" cty:"user_data"`
+	IAMInstanceProfile *terraformWriter.Literal   `json:"iam_instance_profile,omitempty" cty:"iam_instance_profile"`
+	KeyName            *terraformWriter.Literal   `json:"key_name,omitempty" cty:"key_name"`
 }
 
 type terraformElastigroupBlockDevice struct {
@@ -1501,7 +1505,7 @@ func (_ *Elastigroup) RenderTerraform(t *terraform.TerraformTarget, a, e, change
 	// User data.
 	if e.UserData != nil {
 		var err error
-		tf.UserData, err = t.AddFile("spotinst_elastigroup_aws", *e.Name, "user_data", e.UserData, false)
+		tf.UserData, err = t.AddFileResource("spotinst_elastigroup_aws", *e.Name, "user_data", e.UserData, false)
 		if err != nil {
 			return err
 		}
@@ -1539,9 +1543,18 @@ func (_ *Elastigroup) RenderTerraform(t *terraform.TerraformTarget, a, e, change
 		}
 	}
 
-	// Load balancer.
-	if e.LoadBalancer != nil {
-		tf.LoadBalancers = append(tf.LoadBalancers, e.LoadBalancer.TerraformLink())
+	// Load balancers.
+	if e.LoadBalancers != nil {
+		for _, lb := range e.LoadBalancers {
+			tf.LoadBalancers = append(tf.LoadBalancers, lb.TerraformLink())
+		}
+	}
+
+	// Target groups.
+	if e.TargetGroups != nil {
+		for _, tg := range e.TargetGroups {
+			tf.TargetGroups = append(tf.TargetGroups, tg.TerraformLink())
+		}
 	}
 
 	// Public IP.
@@ -1660,8 +1673,8 @@ func (_ *Elastigroup) RenderTerraform(t *terraform.TerraformTarget, a, e, change
 	return t.RenderResource("spotinst_elastigroup_aws", *e.Name, tf)
 }
 
-func (e *Elastigroup) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("spotinst_elastigroup_aws", *e.Name, "id")
+func (e *Elastigroup) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("spotinst_elastigroup_aws", *e.Name, "id")
 }
 
 func (e *Elastigroup) buildTags() []*aws.Tag {
@@ -1687,6 +1700,44 @@ func (e *Elastigroup) buildAutoScaleLabels(labelsMap map[string]string) []*aws.A
 	}
 
 	return labels
+}
+
+func (e *Elastigroup) buildLoadBalancers(cloud awsup.AWSCloud) ([]*aws.LoadBalancer, error) {
+	lbs := make([]*aws.LoadBalancer, len(e.LoadBalancers))
+	for i, lb := range e.LoadBalancers {
+		if lb.LoadBalancerName == nil {
+			lbName := fi.StringValue(lb.GetName())
+			lbDesc, err := cloud.FindELBByNameTag(lbName)
+			if err != nil {
+				return nil, err
+			}
+			if lbDesc == nil {
+				return nil, fmt.Errorf("spotinst: could not find "+
+					"load balancer to attach: %s", lbName)
+			}
+			lbs[i] = &aws.LoadBalancer{
+				Type: fi.String("CLASSIC"),
+				Name: lbDesc.LoadBalancerName,
+			}
+		} else {
+			lbs[i] = &aws.LoadBalancer{
+				Type: fi.String("CLASSIC"),
+				Name: lb.LoadBalancerName,
+			}
+		}
+	}
+	return lbs, nil
+}
+
+func (e *Elastigroup) buildTargetGroups() []*aws.LoadBalancer {
+	tgs := make([]*aws.LoadBalancer, len(e.TargetGroups))
+	for i, tg := range e.TargetGroups {
+		tgs[i] = &aws.LoadBalancer{
+			Type: fi.String("TARGET_GROUP"),
+			Arn:  tg.ARN,
+		}
+	}
+	return tgs
 }
 
 func buildEphemeralDevices(cloud awsup.AWSCloud, machineType *string) ([]*awstasks.BlockDeviceMapping, error) {

@@ -59,7 +59,7 @@ type NewClusterOptions struct {
 	ConfigBase string
 	// KubernetesVersion is the version of Kubernetes to deploy. It defaults to the version recommended by the channel.
 	KubernetesVersion string
-	// AdminAccess is the set of CIDR blocks permitted to connect to the Kubernetes API. It defaults to "0.0.0.0/0".
+	// AdminAccess is the set of CIDR blocks permitted to connect to the Kubernetes API. It defaults to "0.0.0.0/0" and "::/0".
 	AdminAccess []string
 	// SSHAccess is the set of CIDR blocks permitted to connect to SSH on the nodes. It defaults to the value of AdminAccess.
 	SSHAccess []string
@@ -91,6 +91,8 @@ type NewClusterOptions struct {
 	UtilitySubnetIDs []string
 	// Egress defines the method of traffic egress for subnets.
 	Egress string
+	// IPv6 adds IPv6 CIDRs to subnets
+	IPv6 bool
 
 	// OpenstackExternalNet is the name of the external network for the openstack router.
 	OpenstackExternalNet     string
@@ -143,7 +145,7 @@ type NewClusterOptions struct {
 func (o *NewClusterOptions) InitDefaults() {
 	o.Channel = api.DefaultChannel
 	o.Authorization = AuthorizationFlagRBAC
-	o.AdminAccess = []string{"0.0.0.0/0"}
+	o.AdminAccess = []string{"0.0.0.0/0", "::/0"}
 	o.Networking = "kubenet"
 	o.Topology = api.TopologyPublic
 	o.DNSType = string(api.DNSTypePublic)
@@ -212,14 +214,13 @@ func NewCluster(opt *NewClusterOptions, clientset simple.Clientset) (*NewCluster
 
 	cluster.Spec.IAM = &api.IAMSpec{
 		AllowContainerRegistry: true,
-		Legacy:                 false,
 	}
 	cluster.Spec.Kubelet = &api.KubeletConfigSpec{
 		AnonymousAuth: fi.Bool(false),
 	}
 
 	if len(opt.AdminAccess) == 0 {
-		opt.AdminAccess = []string{"0.0.0.0/0"}
+		opt.AdminAccess = []string{"0.0.0.0/0", "::/0"}
 	}
 	cluster.Spec.KubernetesAPIAccess = opt.AdminAccess
 	if len(opt.SSHAccess) != 0 {
@@ -460,7 +461,7 @@ func setupZones(opt *NewClusterOptions, cluster *api.Cluster, allZones sets.Stri
 
 	case api.CloudProviderDO:
 		if len(opt.Zones) > 1 {
-			return nil, fmt.Errorf("digitalocean cloud provider currently only supports 1 region, expect multi-region support when digitalocean support is in beta")
+			return nil, fmt.Errorf("digitalocean cloud provider currently supports one region only.")
 		}
 
 		// For DO we just pass in the region for --zones
@@ -682,6 +683,13 @@ func setupMasters(opt *NewClusterOptions, cluster *api.Cluster, zoneToSubnetMap 
 				g.Spec.Zones = []string{zone}
 			}
 
+			if cluster.IsKubernetesGTE("1.22") {
+				g.Spec.InstanceMetadata = &api.InstanceMetadataOptions{
+					HTTPPutResponseHopLimit: fi.Int64(3),
+					HTTPTokens:              fi.String("required"),
+				}
+			}
+
 			masters = append(masters, g)
 		}
 	}
@@ -796,6 +804,13 @@ func setupNodes(opt *NewClusterOptions, cluster *api.Cluster, zoneToSubnetMap ma
 			g.Spec.Zones = []string{zone}
 		}
 
+		if cluster.IsKubernetesGTE("1.22") {
+			g.Spec.InstanceMetadata = &api.InstanceMetadataOptions{
+				HTTPPutResponseHopLimit: fi.Int64(1),
+				HTTPTokens:              fi.String("required"),
+			}
+		}
+
 		nodes = append(nodes, g)
 	}
 
@@ -835,6 +850,13 @@ func setupAPIServers(opt *NewClusterOptions, cluster *api.Cluster, zoneToSubnetM
 		g.Spec.Subnets = []string{subnet.Name}
 		if cp := api.CloudProviderID(cluster.Spec.CloudProvider); cp == api.CloudProviderGCE || cp == api.CloudProviderAzure {
 			g.Spec.Zones = []string{zone}
+		}
+
+		if cluster.IsKubernetesGTE("1.22") {
+			g.Spec.InstanceMetadata = &api.InstanceMetadataOptions{
+				HTTPPutResponseHopLimit: fi.Int64(1),
+				HTTPTokens:              fi.String("required"),
+			}
 		}
 
 		nodes = append(nodes, g)
@@ -922,6 +944,19 @@ func setupTopology(opt *NewClusterOptions, cluster *api.Cluster, allZones sets.S
 			cluster.Spec.Subnets[i].Type = api.SubnetTypePublic
 		}
 
+		if opt.IPv6 {
+			if api.CloudProviderID(cluster.Spec.CloudProvider) == api.CloudProviderAWS {
+				klog.Warningf("IPv6 support is EXPERIMENTAL and can be changed or removed at any time in the future!!!")
+				for i := range cluster.Spec.Subnets {
+					// Start IPv6 CIDR numbering from "1" to reserve /64#0 for later use
+					// with NonMasqueradeCIDR, ClusterCIDR and ServiceClusterIPRange
+					cluster.Spec.Subnets[i].IPv6CIDR = fmt.Sprintf("/64#%x", i+1)
+				}
+			} else {
+				klog.Errorf("IPv6 support is available only on AWS")
+			}
+		}
+
 	case api.TopologyPrivate:
 		if cluster.Spec.Networking.Kubenet != nil {
 			return nil, fmt.Errorf("invalid networking option %s. Kubenet does not support private topology", opt.Networking)
@@ -987,6 +1022,14 @@ func setupTopology(opt *NewClusterOptions, cluster *api.Cluster, allZones sets.S
 			if api.CloudProviderID(cluster.Spec.CloudProvider) == api.CloudProviderGCE {
 				bastionGroup.Spec.Zones = allZones.List()
 			}
+
+			if cluster.IsKubernetesGTE("1.22") {
+				bastionGroup.Spec.InstanceMetadata = &api.InstanceMetadataOptions{
+					HTTPPutResponseHopLimit: fi.Int64(1),
+					HTTPTokens:              fi.String("required"),
+				}
+			}
+
 		}
 
 	default:
@@ -1130,6 +1173,19 @@ func createEtcdCluster(etcdCluster string, masters []*api.InstanceGroup, encrypt
 		m.InstanceGroup = fi.String(ig.ObjectMeta.Name)
 		etcd.Members = append(etcd.Members, m)
 	}
+
+	// Cilium etcd server is not compacted by the k8s API server.
+	if etcd.Name == "cilium" {
+		if etcd.Manager == nil {
+			etcd.Manager = &api.EtcdManagerSpec{
+				Env: []api.EnvVar{
+					{Name: "ETCD_AUTO_COMPACTION_MODE", Value: "revision"},
+					{Name: "ETCD_AUTO_COMPACTION_RETENTION", Value: "2500"},
+				},
+			}
+		}
+	}
+
 	return etcd
 
 }

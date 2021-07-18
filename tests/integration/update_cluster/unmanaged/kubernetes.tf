@@ -111,11 +111,12 @@ resource "aws_autoscaling_group" "bastion-unmanaged-example-com" {
     id      = aws_launch_template.bastion-unmanaged-example-com.id
     version = aws_launch_template.bastion-unmanaged-example-com.latest_version
   }
-  load_balancers      = [aws_elb.bastion-unmanaged-example-com.id]
-  max_size            = 1
-  metrics_granularity = "1Minute"
-  min_size            = 1
-  name                = "bastion.unmanaged.example.com"
+  load_balancers        = [aws_elb.bastion-unmanaged-example-com.id]
+  max_size              = 1
+  metrics_granularity   = "1Minute"
+  min_size              = 1
+  name                  = "bastion.unmanaged.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -160,11 +161,12 @@ resource "aws_autoscaling_group" "master-us-test-1a-masters-unmanaged-example-co
     id      = aws_launch_template.master-us-test-1a-masters-unmanaged-example-com.id
     version = aws_launch_template.master-us-test-1a-masters-unmanaged-example-com.latest_version
   }
-  load_balancers      = [aws_elb.api-unmanaged-example-com.id]
-  max_size            = 1
-  metrics_granularity = "1Minute"
-  min_size            = 1
-  name                = "master-us-test-1a.masters.unmanaged.example.com"
+  load_balancers        = [aws_elb.api-unmanaged-example-com.id]
+  max_size              = 1
+  metrics_granularity   = "1Minute"
+  min_size              = 1
+  name                  = "master-us-test-1a.masters.unmanaged.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -224,10 +226,11 @@ resource "aws_autoscaling_group" "nodes-unmanaged-example-com" {
     id      = aws_launch_template.nodes-unmanaged-example-com.id
     version = aws_launch_template.nodes-unmanaged-example-com.latest_version
   }
-  max_size            = 2
-  metrics_granularity = "1Minute"
-  min_size            = 2
-  name                = "nodes.unmanaged.example.com"
+  max_size              = 2
+  metrics_granularity   = "1Minute"
+  min_size              = 2
+  name                  = "nodes.unmanaged.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -379,24 +382,6 @@ resource "aws_iam_instance_profile" "nodes-unmanaged-example-com" {
   }
 }
 
-resource "aws_iam_role_policy" "bastions-unmanaged-example-com" {
-  name   = "bastions.unmanaged.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_bastions.unmanaged.example.com_policy")
-  role   = aws_iam_role.bastions-unmanaged-example-com.name
-}
-
-resource "aws_iam_role_policy" "masters-unmanaged-example-com" {
-  name   = "masters.unmanaged.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_masters.unmanaged.example.com_policy")
-  role   = aws_iam_role.masters-unmanaged-example-com.name
-}
-
-resource "aws_iam_role_policy" "nodes-unmanaged-example-com" {
-  name   = "nodes.unmanaged.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_nodes.unmanaged.example.com_policy")
-  role   = aws_iam_role.nodes-unmanaged-example-com.name
-}
-
 resource "aws_iam_role" "bastions-unmanaged-example-com" {
   assume_role_policy = file("${path.module}/data/aws_iam_role_bastions.unmanaged.example.com_policy")
   name               = "bastions.unmanaged.example.com"
@@ -425,6 +410,24 @@ resource "aws_iam_role" "nodes-unmanaged-example-com" {
     "Name"                                        = "nodes.unmanaged.example.com"
     "kubernetes.io/cluster/unmanaged.example.com" = "owned"
   }
+}
+
+resource "aws_iam_role_policy" "bastions-unmanaged-example-com" {
+  name   = "bastions.unmanaged.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_bastions.unmanaged.example.com_policy")
+  role   = aws_iam_role.bastions-unmanaged-example-com.name
+}
+
+resource "aws_iam_role_policy" "masters-unmanaged-example-com" {
+  name   = "masters.unmanaged.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_masters.unmanaged.example.com_policy")
+  role   = aws_iam_role.masters-unmanaged-example-com.name
+}
+
+resource "aws_iam_role_policy" "nodes-unmanaged-example-com" {
+  name   = "nodes.unmanaged.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_nodes.unmanaged.example.com_policy")
+  role   = aws_iam_role.nodes-unmanaged-example-com.name
 }
 
 resource "aws_key_pair" "kubernetes-unmanaged-example-com-c4a6ed9aa889b9e2c39cd663eb9c7157" {
@@ -463,10 +466,14 @@ resource "aws_launch_template" "bastion-unmanaged-example-com" {
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "bastion.unmanaged.example.com"
   network_interfaces {
     associate_public_ip_address = true
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.bastion-unmanaged-example-com.id]
   }
   tag_specifications {
@@ -534,10 +541,14 @@ resource "aws_launch_template" "master-us-test-1a-masters-unmanaged-example-com"
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "master-us-test-1a.masters.unmanaged.example.com"
   network_interfaces {
     associate_public_ip_address = false
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.masters-unmanaged-example-com.id]
   }
   tag_specifications {
@@ -611,10 +622,14 @@ resource "aws_launch_template" "nodes-unmanaged-example-com" {
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "nodes.unmanaged.example.com"
   network_interfaces {
     associate_public_ip_address = false
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.nodes-unmanaged-example-com.id]
   }
   tag_specifications {
@@ -664,6 +679,180 @@ resource "aws_route53_record" "api-unmanaged-example-com" {
   zone_id = "/hostedzone/Z1AFAKE1ZON3YO"
 }
 
+resource "aws_s3_bucket_object" "cluster-completed-spec" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_cluster-completed.spec_content")
+  key                    = "clusters.example.com/unmanaged.example.com/cluster-completed.spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-events_content")
+  key                    = "clusters.example.com/unmanaged.example.com/backups/etcd/events/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-main_content")
+  key                    = "clusters.example.com/unmanaged.example.com/backups/etcd/main/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "kops-version-txt" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_kops-version.txt_content")
+  key                    = "clusters.example.com/unmanaged.example.com/kops-version.txt"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-events_content")
+  key                    = "clusters.example.com/unmanaged.example.com/manifests/etcd/events.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-main_content")
+  key                    = "clusters.example.com/unmanaged.example.com/manifests/etcd/main.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-static-kube-apiserver-healthcheck" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-static-kube-apiserver-healthcheck_content")
+  key                    = "clusters.example.com/unmanaged.example.com/manifests/static/kube-apiserver-healthcheck.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-master-us-test-1a" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-master-us-test-1a_content")
+  key                    = "clusters.example.com/unmanaged.example.com/igconfig/master/master-us-test-1a/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-nodes" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-nodes_content")
+  key                    = "clusters.example.com/unmanaged.example.com/igconfig/node/nodes/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-bootstrap" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-bootstrap_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/bootstrap-channel.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-core-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-core.addons.k8s.io_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/core.addons.k8s.io/v1.4.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-coredns-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-coredns.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/coredns.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-dns-controller-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-dns-controller.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/dns-controller.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-kops-controller-addons-k8s-io-k8s-1-16" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-kops-controller.addons.k8s.io-k8s-1.16_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/kops-controller.addons.k8s.io/k8s-1.16.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-kubelet-api-rbac-addons-k8s-io-k8s-1-9" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-kubelet-api.rbac.addons.k8s.io-k8s-1.9_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/kubelet-api.rbac.addons.k8s.io/k8s-1.9.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-limit-range-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-limit-range.addons.k8s.io_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/limit-range.addons.k8s.io/v1.5.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "unmanaged-example-com-addons-storage-aws-addons-k8s-io-v1-15-0" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_unmanaged.example.com-addons-storage-aws.addons.k8s.io-v1.15.0_content")
+  key                    = "clusters.example.com/unmanaged.example.com/addons/storage-aws.addons.k8s.io/v1.15.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_security_group" "api-elb-unmanaged-example-com" {
+  description = "Security group for api ELB"
+  name        = "api-elb.unmanaged.example.com"
+  tags = {
+    "KubernetesCluster"                           = "unmanaged.example.com"
+    "Name"                                        = "api-elb.unmanaged.example.com"
+    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
+  }
+  vpc_id = "vpc-12345678"
+}
+
+resource "aws_security_group" "bastion-elb-unmanaged-example-com" {
+  description = "Security group for bastion ELB"
+  name        = "bastion-elb.unmanaged.example.com"
+  tags = {
+    "KubernetesCluster"                           = "unmanaged.example.com"
+    "Name"                                        = "bastion-elb.unmanaged.example.com"
+    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
+  }
+  vpc_id = "vpc-12345678"
+}
+
+resource "aws_security_group" "bastion-unmanaged-example-com" {
+  description = "Security group for bastion"
+  name        = "bastion.unmanaged.example.com"
+  tags = {
+    "KubernetesCluster"                           = "unmanaged.example.com"
+    "Name"                                        = "bastion.unmanaged.example.com"
+    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
+  }
+  vpc_id = "vpc-12345678"
+}
+
+resource "aws_security_group" "masters-unmanaged-example-com" {
+  description = "Security group for masters"
+  name        = "masters.unmanaged.example.com"
+  tags = {
+    "KubernetesCluster"                           = "unmanaged.example.com"
+    "Name"                                        = "masters.unmanaged.example.com"
+    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
+  }
+  vpc_id = "vpc-12345678"
+}
+
+resource "aws_security_group" "nodes-unmanaged-example-com" {
+  description = "Security group for nodes"
+  name        = "nodes.unmanaged.example.com"
+  tags = {
+    "KubernetesCluster"                           = "unmanaged.example.com"
+    "Name"                                        = "nodes.unmanaged.example.com"
+    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
+  }
+  vpc_id = "vpc-12345678"
+}
+
 resource "aws_security_group_rule" "from-0-0-0-0--0-ingress-tcp-22to22-bastion-elb-unmanaged-example-com" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 22
@@ -691,9 +880,27 @@ resource "aws_security_group_rule" "from-api-elb-unmanaged-example-com-egress-al
   type              = "egress"
 }
 
+resource "aws_security_group_rule" "from-api-elb-unmanaged-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "-1"
+  security_group_id = aws_security_group.api-elb-unmanaged-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
 resource "aws_security_group_rule" "from-bastion-elb-unmanaged-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.bastion-elb-unmanaged-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-bastion-elb-unmanaged-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.bastion-elb-unmanaged-example-com.id
   to_port           = 0
@@ -712,6 +919,15 @@ resource "aws_security_group_rule" "from-bastion-elb-unmanaged-example-com-ingre
 resource "aws_security_group_rule" "from-bastion-unmanaged-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.bastion-unmanaged-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-bastion-unmanaged-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.bastion-unmanaged-example-com.id
   to_port           = 0
@@ -745,6 +961,15 @@ resource "aws_security_group_rule" "from-masters-unmanaged-example-com-egress-al
   type              = "egress"
 }
 
+resource "aws_security_group_rule" "from-masters-unmanaged-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "-1"
+  security_group_id = aws_security_group.masters-unmanaged-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
 resource "aws_security_group_rule" "from-masters-unmanaged-example-com-ingress-all-0to0-masters-unmanaged-example-com" {
   from_port                = 0
   protocol                 = "-1"
@@ -766,6 +991,15 @@ resource "aws_security_group_rule" "from-masters-unmanaged-example-com-ingress-a
 resource "aws_security_group_rule" "from-nodes-unmanaged-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.nodes-unmanaged-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-nodes-unmanaged-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.nodes-unmanaged-example-com.id
   to_port           = 0
@@ -833,61 +1067,6 @@ resource "aws_security_group_rule" "icmp-pmtu-api-elb-0-0-0-0--0" {
   security_group_id = aws_security_group.api-elb-unmanaged-example-com.id
   to_port           = 4
   type              = "ingress"
-}
-
-resource "aws_security_group" "api-elb-unmanaged-example-com" {
-  description = "Security group for api ELB"
-  name        = "api-elb.unmanaged.example.com"
-  tags = {
-    "KubernetesCluster"                           = "unmanaged.example.com"
-    "Name"                                        = "api-elb.unmanaged.example.com"
-    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
-  }
-  vpc_id = "vpc-12345678"
-}
-
-resource "aws_security_group" "bastion-elb-unmanaged-example-com" {
-  description = "Security group for bastion ELB"
-  name        = "bastion-elb.unmanaged.example.com"
-  tags = {
-    "KubernetesCluster"                           = "unmanaged.example.com"
-    "Name"                                        = "bastion-elb.unmanaged.example.com"
-    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
-  }
-  vpc_id = "vpc-12345678"
-}
-
-resource "aws_security_group" "bastion-unmanaged-example-com" {
-  description = "Security group for bastion"
-  name        = "bastion.unmanaged.example.com"
-  tags = {
-    "KubernetesCluster"                           = "unmanaged.example.com"
-    "Name"                                        = "bastion.unmanaged.example.com"
-    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
-  }
-  vpc_id = "vpc-12345678"
-}
-
-resource "aws_security_group" "masters-unmanaged-example-com" {
-  description = "Security group for masters"
-  name        = "masters.unmanaged.example.com"
-  tags = {
-    "KubernetesCluster"                           = "unmanaged.example.com"
-    "Name"                                        = "masters.unmanaged.example.com"
-    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
-  }
-  vpc_id = "vpc-12345678"
-}
-
-resource "aws_security_group" "nodes-unmanaged-example-com" {
-  description = "Security group for nodes"
-  name        = "nodes.unmanaged.example.com"
-  tags = {
-    "KubernetesCluster"                           = "unmanaged.example.com"
-    "Name"                                        = "nodes.unmanaged.example.com"
-    "kubernetes.io/cluster/unmanaged.example.com" = "owned"
-  }
-  vpc_id = "vpc-12345678"
 }
 
 resource "aws_subnet" "us-test-1a-unmanaged-example-com" {

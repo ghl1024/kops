@@ -24,6 +24,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-06-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/model"
 	"k8s.io/kops/pkg/model/defaults"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/fitasks"
@@ -32,6 +33,14 @@ import (
 func TestVMScaleSetModelBuilder_Build(t *testing.T) {
 	b := VMScaleSetModelBuilder{
 		AzureModelContext: newTestAzureModelContext(),
+		BootstrapScriptBuilder: &model.BootstrapScriptBuilder{
+			Lifecycle: fi.LifecycleSync,
+			Cluster: &kops.Cluster{
+				Spec: kops.ClusterSpec{
+					Networking: &kops.NetworkingSpec{},
+				},
+			},
+		},
 	}
 	c := &fi.ModelBuilderContext{
 		Tasks: make(map[string]fi.Task),
@@ -43,6 +52,12 @@ func TestVMScaleSetModelBuilder_Build(t *testing.T) {
 		Type:    "ca",
 	}
 	c.AddTask(caTask)
+	etcdCaTask := &fitasks.Keypair{
+		Name:    fi.String("etcd-clients-ca"),
+		Subject: "cn=etcd-clients-ca",
+		Type:    "ca",
+	}
+	c.AddTask(etcdCaTask)
 
 	err := b.Build(c)
 	if err != nil {

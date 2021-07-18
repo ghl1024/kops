@@ -46,11 +46,6 @@ func (d *deployer) Up() error {
 		_ = d.Down()
 	}
 
-	publicIP, err := util.ExternalIPRange()
-	if err != nil {
-		return err
-	}
-
 	if d.CloudProvider == "gce" && d.createBucket {
 		if err := gce.EnsureGCSBucket(d.stateStore(), d.GCPProject); err != nil {
 			return err
@@ -59,6 +54,11 @@ func (d *deployer) Up() error {
 
 	adminAccess := d.AdminAccess
 	if adminAccess == "" {
+		publicIP, err := util.ExternalIPRange()
+		if err != nil {
+			return err
+		}
+
 		adminAccess = publicIP
 	}
 
@@ -133,7 +133,8 @@ func (d *deployer) createCluster(zones []string, adminAccess string) error {
 		}
 		args = appendIfUnset(args, "--vpc", strings.Split(d.ClusterName, ".")[0])
 	case "digitalocean":
-		args = appendIfUnset(args, "--master-size", "s-8vcpu-16gb")
+		args = appendIfUnset(args, "--master-size", "c2-16vcpu-32gb")
+		args = appendIfUnset(args, "--node-size", "c2-16vcpu-32gb")
 	}
 
 	if d.terraform != nil {
@@ -162,9 +163,10 @@ func (d *deployer) createCluster(zones []string, adminAccess string) error {
 func (d *deployer) IsUp() (bool, error) {
 	wait := d.ValidationWait
 	if wait == 0 {
-		if d.TerraformVersion != "" {
+		if d.TerraformVersion != "" || d.CloudProvider == "digitalocean" {
 			// `--target terraform` doesn't precreate the API DNS records,
-			// so kops is more likely to hit negative TTLs during validation
+			// so kops is more likely to hit negative TTLs during validation.
+			// Digital Ocean also occasionally takes longer to validate.
 			wait = time.Duration(20) * time.Minute
 		} else {
 			wait = time.Duration(15) * time.Minute

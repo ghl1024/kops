@@ -45,20 +45,12 @@ func (b *EtcdManagerOptionsBuilder) BuildOptions(o interface{}) error {
 			continue
 		}
 
-		if etcdCluster.Manager == nil {
-			etcdCluster.Manager = &kops.EtcdManagerSpec{}
-		}
-
 		if etcdCluster.Backups == nil {
 			etcdCluster.Backups = &kops.EtcdBackupSpec{}
 		}
 		if etcdCluster.Backups.BackupStore == "" {
 			base := clusterSpec.ConfigBase
 			etcdCluster.Backups.BackupStore = urls.Join(base, "backups", "etcd", etcdCluster.Name)
-		}
-
-		if etcdCluster.Version == "" {
-			etcdCluster.Version = "3.2.18"
 		}
 
 		if !etcdVersionIsSupported(etcdCluster.Version) {
@@ -75,7 +67,7 @@ func (b *EtcdManagerOptionsBuilder) BuildOptions(o interface{}) error {
 	return nil
 }
 
-var supportedEtcdVersions = []string{"3.1.12", "3.2.18", "3.2.24", "3.3.10", "3.3.13", "3.3.17", "3.4.3", "3.4.13"}
+var supportedEtcdVersions = []string{"3.1.12", "3.2.18", "3.2.24", "3.3.10", "3.3.13", "3.3.17", "3.4.3", "3.4.13", "3.5.0"}
 
 func etcdVersionIsSupported(version string) bool {
 	version = strings.TrimPrefix(version, "v")

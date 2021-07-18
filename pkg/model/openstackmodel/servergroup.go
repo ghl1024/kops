@@ -35,7 +35,7 @@ import (
 type ServerGroupModelBuilder struct {
 	*OpenstackModelContext
 	BootstrapScriptBuilder *model.BootstrapScriptBuilder
-	Lifecycle              *fi.Lifecycle
+	Lifecycle              fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &ServerGroupModelBuilder{}
@@ -150,6 +150,7 @@ func (b *ServerGroupModelBuilder) buildInstances(c *fi.ModelBuilderContext, sg *
 		metaWithName[openstack.TagKopsName] = fi.StringValue(instanceName)
 		instanceTask := &openstacktasks.Instance{
 			Name:             instanceName,
+			Lifecycle:        b.Lifecycle,
 			GroupName:        s(groupName),
 			Region:           fi.String(b.Cluster.Spec.Subnets[0].Region),
 			Flavor:           fi.String(ig.Spec.MachineType),
@@ -218,11 +219,17 @@ func (b *ServerGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	var masters []*openstacktasks.ServerGroup
 	for _, ig := range b.InstanceGroups {
 		klog.V(2).Infof("Found instance group with name %s and role %v.", ig.Name, ig.Spec.Role)
+		affinityPolicies := []string{}
+		if v, ok := ig.ObjectMeta.Annotations[openstack.OS_ANNOTATION+openstack.SERVER_GROUP_AFFINITY]; ok {
+			affinityPolicies = append(affinityPolicies, v)
+		} else {
+			affinityPolicies = append(affinityPolicies, "anti-affinity")
+		}
 		sgTask := &openstacktasks.ServerGroup{
 			Name:        s(fmt.Sprintf("%s-%s", clusterName, ig.Name)),
 			ClusterName: s(clusterName),
 			IGName:      s(ig.Name),
-			Policies:    []string{"anti-affinity"},
+			Policies:    affinityPolicies,
 			Lifecycle:   b.Lifecycle,
 			MaxSize:     ig.Spec.MaxSize,
 		}

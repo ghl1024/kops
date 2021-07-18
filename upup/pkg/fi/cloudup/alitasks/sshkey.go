@@ -22,6 +22,7 @@ import (
 
 	common "github.com/denverdino/aliyungo/common"
 	ecs "github.com/denverdino/aliyungo/ecs"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 
 	"k8s.io/klog/v2"
 	"k8s.io/kops/pkg/pki"
@@ -33,7 +34,7 @@ import (
 // +kops:fitask
 type SSHKey struct {
 	Name               *string
-	Lifecycle          *fi.Lifecycle
+	Lifecycle          fi.Lifecycle
 	PublicKey          fi.Resource
 	KeyPairFingerPrint *string
 }
@@ -163,6 +164,6 @@ func (_ *SSHKey) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *SS
 	return t.RenderResource("alicloud_key_pair", *e.Name, tf)
 }
 
-func (s *SSHKey) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("alicloud_key_pair", *s.Name, "name")
+func (s *SSHKey) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("alicloud_key_pair", *s.Name, "name")
 }

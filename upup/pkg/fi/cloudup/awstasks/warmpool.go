@@ -33,7 +33,7 @@ type WarmPool struct {
 	// Name is the name of the ASG.
 	Name *string
 	// Lifecycle is the resource lifecycle.
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	Enabled *bool
 	// MaxSize is the max number of nodes in the warm pool.
@@ -52,20 +52,25 @@ func (e *WarmPool) Find(c *fi.Context) (*WarmPool, error) {
 		AutoScalingGroupName: e.Name,
 	})
 	if err != nil {
+		if awsup.AWSErrorCode(err) == "ValidationError" {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if warmPool.WarmPoolConfiguration == nil {
 		return &WarmPool{
-			Name:    e.Name,
-			Enabled: fi.Bool(false),
+			Name:      e.Name,
+			Lifecycle: e.Lifecycle,
+			Enabled:   fi.Bool(false),
 		}, nil
 	}
 
 	actual := &WarmPool{
-		Name:    e.Name,
-		Enabled: fi.Bool(true),
-		MaxSize: warmPool.WarmPoolConfiguration.MaxGroupPreparedCapacity,
-		MinSize: fi.Int64Value(warmPool.WarmPoolConfiguration.MinSize),
+		Name:      e.Name,
+		Lifecycle: e.Lifecycle,
+		Enabled:   fi.Bool(true),
+		MaxSize:   warmPool.WarmPoolConfiguration.MaxGroupPreparedCapacity,
+		MinSize:   fi.Int64Value(warmPool.WarmPoolConfiguration.MinSize),
 	}
 	return actual, nil
 }
@@ -96,16 +101,19 @@ func (*WarmPool) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *WarmPool) error
 
 			_, err := svc.PutWarmPool(request)
 			if err != nil {
+				if awsup.AWSErrorCode(err) == "ValidationError" {
+					return fi.NewTryAgainLaterError("waiting for ASG to become ready")
+				}
 				return fmt.Errorf("error modifying warm pool: %w", err)
 			}
-		} else {
+		} else if a != nil {
 			_, err := svc.DeleteWarmPool(&autoscaling.DeleteWarmPoolInput{
 				AutoScalingGroupName: e.Name,
 				// We don't need to do any cleanup so, the faster the better
 				ForceDelete: fi.Bool(true),
 			})
 			if err != nil {
-				return fmt.Errorf("error modifying warm pool: %w", err)
+				return fmt.Errorf("error deleting warm pool: %w", err)
 			}
 		}
 	}

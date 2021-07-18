@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -42,6 +41,8 @@ import (
 type BootstrapClientTask struct {
 	// Certs are the requested certificates.
 	Certs map[string]*BootstrapCert
+	// KeypairIDs are the keypair IDs of the CAs to use for issuing certificates.
+	KeypairIDs map[string]string
 
 	// Client holds the client wrapper for the kops-bootstrap protocol
 	Client *KopsBootstrapClient
@@ -84,6 +85,7 @@ func (b *BootstrapClientTask) Run(c *fi.Context) error {
 	req := nodeup.BootstrapRequest{
 		APIVersion: nodeup.BootstrapAPIVersion,
 		Certs:      map[string]string{},
+		KeypairIDs: b.KeypairIDs,
 	}
 
 	if b.keys == nil {
@@ -103,7 +105,7 @@ func (b *BootstrapClientTask) Run(c *fi.Context) error {
 			b.keys[name] = key
 		}
 
-		pkData, err := x509.MarshalPKIXPublicKey(key.Key.(*rsa.PrivateKey).Public())
+		pkData, err := x509.MarshalPKIXPublicKey(key.Key.Public())
 		if err != nil {
 			return fmt.Errorf("marshalling public key: %v", err)
 		}
@@ -134,8 +136,8 @@ func (b *BootstrapClientTask) Run(c *fi.Context) error {
 type KopsBootstrapClient struct {
 	// Authenticator generates authentication credentials for requests.
 	Authenticator fi.Authenticator
-	// CA is the CA certificate for kops-controller.
-	CA []byte
+	// CAs are the CA certificates for kops-controller.
+	CAs []byte
 
 	// BaseURL is the base URL for the server
 	BaseURL url.URL
@@ -146,7 +148,7 @@ type KopsBootstrapClient struct {
 func (b *KopsBootstrapClient) QueryBootstrap(ctx context.Context, req *nodeup.BootstrapRequest) (*nodeup.BootstrapResponse, error) {
 	if b.httpClient == nil {
 		certPool := x509.NewCertPool()
-		certPool.AppendCertsFromPEM(b.CA)
+		certPool.AppendCertsFromPEM(b.CAs)
 
 		b.httpClient = &http.Client{
 			Timeout: time.Duration(15) * time.Second,

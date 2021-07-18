@@ -283,11 +283,15 @@
             "HttpPutResponseHopLimit": 1,
             "HttpTokens": "optional"
           },
+          "Monitoring": {
+            "Enabled": false
+          },
           "NetworkInterfaces": [
             {
               "AssociatePublicIpAddress": true,
               "DeleteOnTermination": true,
               "DeviceIndex": 0,
+              "Ipv6AddressCount": 0,
               "Groups": [
                 {
                   "Ref": "AWSEC2SecurityGroupbastionprivatesharedipexamplecom"
@@ -401,11 +405,15 @@
             "HttpPutResponseHopLimit": 1,
             "HttpTokens": "optional"
           },
+          "Monitoring": {
+            "Enabled": false
+          },
           "NetworkInterfaces": [
             {
               "AssociatePublicIpAddress": false,
               "DeleteOnTermination": true,
               "DeviceIndex": 0,
+              "Ipv6AddressCount": 0,
               "Groups": [
                 {
                   "Ref": "AWSEC2SecurityGroupmastersprivatesharedipexamplecom"
@@ -539,11 +547,15 @@
             "HttpPutResponseHopLimit": 1,
             "HttpTokens": "optional"
           },
+          "Monitoring": {
+            "Enabled": false
+          },
           "NetworkInterfaces": [
             {
               "AssociatePublicIpAddress": false,
               "DeleteOnTermination": true,
               "DeviceIndex": 0,
+              "Ipv6AddressCount": 0,
               "Groups": [
                 {
                   "Ref": "AWSEC2SecurityGroupnodesprivatesharedipexamplecom"
@@ -646,6 +658,16 @@
         ]
       }
     },
+    "AWSEC2Route0": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "AWSEC2RouteTableprivatesharedipexamplecom"
+        },
+        "DestinationIpv6CidrBlock": "::/0",
+        "GatewayId": "igw-1"
+      }
+    },
     "AWSEC2Route00000": {
       "Type": "AWS::EC2::Route",
       "Properties": {
@@ -716,6 +738,18 @@
         }
       }
     },
+    "AWSEC2SecurityGroupEgressfromapielbprivatesharedipexamplecomegressall0to00": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "AWSEC2SecurityGroupapielbprivatesharedipexamplecom"
+        },
+        "FromPort": 0,
+        "ToPort": 0,
+        "IpProtocol": "-1",
+        "CidrIpv6": "::/0"
+      }
+    },
     "AWSEC2SecurityGroupEgressfromapielbprivatesharedipexamplecomegressall0to000000": {
       "Type": "AWS::EC2::SecurityGroupEgress",
       "Properties": {
@@ -726,6 +760,18 @@
         "ToPort": 0,
         "IpProtocol": "-1",
         "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "AWSEC2SecurityGroupEgressfrombastionelbprivatesharedipexamplecomegressall0to00": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "AWSEC2SecurityGroupbastionelbprivatesharedipexamplecom"
+        },
+        "FromPort": 0,
+        "ToPort": 0,
+        "IpProtocol": "-1",
+        "CidrIpv6": "::/0"
       }
     },
     "AWSEC2SecurityGroupEgressfrombastionelbprivatesharedipexamplecomegressall0to000000": {
@@ -740,6 +786,18 @@
         "CidrIp": "0.0.0.0/0"
       }
     },
+    "AWSEC2SecurityGroupEgressfrombastionprivatesharedipexamplecomegressall0to00": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "AWSEC2SecurityGroupbastionprivatesharedipexamplecom"
+        },
+        "FromPort": 0,
+        "ToPort": 0,
+        "IpProtocol": "-1",
+        "CidrIpv6": "::/0"
+      }
+    },
     "AWSEC2SecurityGroupEgressfrombastionprivatesharedipexamplecomegressall0to000000": {
       "Type": "AWS::EC2::SecurityGroupEgress",
       "Properties": {
@@ -752,6 +810,18 @@
         "CidrIp": "0.0.0.0/0"
       }
     },
+    "AWSEC2SecurityGroupEgressfrommastersprivatesharedipexamplecomegressall0to00": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "AWSEC2SecurityGroupmastersprivatesharedipexamplecom"
+        },
+        "FromPort": 0,
+        "ToPort": 0,
+        "IpProtocol": "-1",
+        "CidrIpv6": "::/0"
+      }
+    },
     "AWSEC2SecurityGroupEgressfrommastersprivatesharedipexamplecomegressall0to000000": {
       "Type": "AWS::EC2::SecurityGroupEgress",
       "Properties": {
@@ -762,6 +832,18 @@
         "ToPort": 0,
         "IpProtocol": "-1",
         "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "AWSEC2SecurityGroupEgressfromnodesprivatesharedipexamplecomegressall0to00": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "AWSEC2SecurityGroupnodesprivatesharedipexamplecom"
+        },
+        "FromPort": 0,
+        "ToPort": 0,
+        "IpProtocol": "-1",
+        "CidrIpv6": "::/0"
       }
     },
     "AWSEC2SecurityGroupEgressfromnodesprivatesharedipexamplecomegressall0to000000": {
@@ -1366,13 +1448,9 @@
         "PolicyDocument": {
           "Statement": [
             {
-              "Action": [
-                "ec2:DescribeRegions"
-              ],
+              "Action": "ec2:DescribeRegions",
               "Effect": "Allow",
-              "Resource": [
-                "*"
-              ]
+              "Resource": "*"
             }
           ],
           "Version": "2012-10-17"
@@ -1391,49 +1469,11 @@
         "PolicyDocument": {
           "Statement": [
             {
-              "Action": [
-                "ec2:DescribeAccountAttributes",
-                "ec2:DescribeInstances",
-                "ec2:DescribeInternetGateways",
-                "ec2:DescribeRegions",
-                "ec2:DescribeRouteTables",
-                "ec2:DescribeSecurityGroups",
-                "ec2:DescribeSubnets",
-                "ec2:DescribeVolumes"
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                "*"
-              ]
-            },
-            {
-              "Action": [
-                "ec2:CreateSecurityGroup",
-                "ec2:CreateTags",
-                "ec2:CreateVolume",
-                "ec2:DescribeVolumesModifications",
-                "ec2:ModifyInstanceAttribute",
-                "ec2:ModifyVolume"
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                "*"
-              ]
-            },
-            {
-              "Action": [
-                "ec2:AttachVolume",
-                "ec2:AuthorizeSecurityGroupIngress",
-                "ec2:CreateRoute",
-                "ec2:DeleteRoute",
-                "ec2:DeleteSecurityGroup",
-                "ec2:DeleteVolume",
-                "ec2:DetachVolume",
-                "ec2:RevokeSecurityGroupIngress"
-              ],
+              "Action": "ec2:AttachVolume",
               "Condition": {
                 "StringEquals": {
-                  "ec2:ResourceTag/KubernetesCluster": "private-shared-ip.example.com"
+                  "aws:ResourceTag/KubernetesCluster": "private-shared-ip.example.com",
+                  "aws:ResourceTag/k8s.io/role/master": "1"
                 }
               },
               "Effect": "Allow",
@@ -1442,90 +1482,36 @@
               ]
             },
             {
-              "Action": [
-                "autoscaling:DescribeAutoScalingGroups",
-                "autoscaling:DescribeLaunchConfigurations",
-                "autoscaling:DescribeTags",
-                "ec2:DescribeLaunchTemplateVersions"
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                "*"
-              ]
-            },
-            {
-              "Action": [
-                "autoscaling:SetDesiredCapacity",
-                "autoscaling:TerminateInstanceInAutoScalingGroup",
-                "autoscaling:UpdateAutoScalingGroup"
-              ],
+              "Action": "ec2:CreateTags",
               "Condition": {
                 "StringEquals": {
-                  "autoscaling:ResourceTag/KubernetesCluster": "private-shared-ip.example.com"
+                  "ec2:CreateAction": [
+                    "CreateVolume",
+                    "CreateSnapshot"
+                  ]
                 }
               },
               "Effect": "Allow",
               "Resource": [
-                "*"
+                "arn:aws:ec2:*:*:volume/*",
+                "arn:aws:ec2:*:*:snapshot/*"
               ]
             },
             {
               "Action": [
-                "autoscaling:CompleteLifecycleAction",
-                "autoscaling:DescribeAutoScalingInstances"
-              ],
-              "Condition": {
-                "StringEquals": {
-                  "autoscaling:ResourceTag/KubernetesCluster": "private-shared-ip.example.com"
-                }
-              },
-              "Effect": "Allow",
-              "Resource": [
-                "*"
-              ]
-            },
-            {
-              "Action": [
-                "elasticloadbalancing:AddTags",
-                "elasticloadbalancing:AttachLoadBalancerToSubnets",
-                "elasticloadbalancing:ApplySecurityGroupsToLoadBalancer",
                 "elasticloadbalancing:CreateLoadBalancer",
                 "elasticloadbalancing:CreateLoadBalancerPolicy",
                 "elasticloadbalancing:CreateLoadBalancerListeners",
-                "elasticloadbalancing:ConfigureHealthCheck",
-                "elasticloadbalancing:DeleteLoadBalancer",
-                "elasticloadbalancing:DeleteLoadBalancerListeners",
-                "elasticloadbalancing:DescribeLoadBalancers",
-                "elasticloadbalancing:DescribeLoadBalancerAttributes",
-                "elasticloadbalancing:DetachLoadBalancerFromSubnets",
-                "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
-                "elasticloadbalancing:ModifyLoadBalancerAttributes",
-                "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
-                "elasticloadbalancing:SetLoadBalancerPoliciesForBackendServer"
-              ],
-              "Effect": "Allow",
-              "Resource": [
-                "*"
-              ]
-            },
-            {
-              "Action": [
-                "ec2:DescribeVpcs",
-                "elasticloadbalancing:AddTags",
+                "ec2:CreateSecurityGroup",
+                "ec2:CreateVolume",
                 "elasticloadbalancing:CreateListener",
-                "elasticloadbalancing:CreateTargetGroup",
-                "elasticloadbalancing:DeleteListener",
-                "elasticloadbalancing:DeleteTargetGroup",
-                "elasticloadbalancing:DeregisterTargets",
-                "elasticloadbalancing:DescribeListeners",
-                "elasticloadbalancing:DescribeLoadBalancerPolicies",
-                "elasticloadbalancing:DescribeTargetGroups",
-                "elasticloadbalancing:DescribeTargetHealth",
-                "elasticloadbalancing:ModifyListener",
-                "elasticloadbalancing:ModifyTargetGroup",
-                "elasticloadbalancing:RegisterTargets",
-                "elasticloadbalancing:SetLoadBalancerPoliciesOfListener"
+                "elasticloadbalancing:CreateTargetGroup"
               ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/KubernetesCluster": "private-shared-ip.example.com"
+                }
+              },
               "Effect": "Allow",
               "Resource": [
                 "*"
@@ -1533,12 +1519,53 @@
             },
             {
               "Action": [
-                "iam:ListServerCertificates",
-                "iam:GetServerCertificate"
+                "s3:Get*"
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::placeholder-read-bucket/clusters.example.com/private-shared-ip.example.com/*"
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion",
+                "s3:PutObject"
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::placeholder-write-bucket/clusters.example.com/private-shared-ip.example.com/backups/etcd/main/*"
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion",
+                "s3:PutObject"
+              ],
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::placeholder-write-bucket/clusters.example.com/private-shared-ip.example.com/backups/etcd/events/*"
+            },
+            {
+              "Action": [
+                "s3:GetBucketLocation",
+                "s3:GetEncryptionConfiguration",
+                "s3:ListBucket",
+                "s3:ListBucketVersions"
               ],
               "Effect": "Allow",
               "Resource": [
-                "*"
+                "arn:aws:s3:::placeholder-read-bucket"
+              ]
+            },
+            {
+              "Action": [
+                "s3:GetBucketLocation",
+                "s3:GetEncryptionConfiguration",
+                "s3:ListBucket",
+                "s3:ListBucketVersions"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:s3:::placeholder-write-bucket"
               ]
             },
             {
@@ -1569,6 +1596,119 @@
               "Resource": [
                 "*"
               ]
+            },
+            {
+              "Action": [
+                "ec2:CreateVolume"
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/KubernetesCluster": "private-shared-ip.example.com"
+                }
+              },
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": "ec2:CreateTags",
+              "Condition": {
+                "StringEquals": {
+                  "ec2:CreateAction": [
+                    "CreateVolume",
+                    "CreateSnapshot"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:ec2:*:*:volume/*",
+                "arn:aws:ec2:*:*:snapshot/*"
+              ]
+            },
+            {
+              "Action": "ec2:DeleteTags",
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/KubernetesCluster": "private-shared-ip.example.com"
+                }
+              },
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:ec2:*:*:volume/*",
+                "arn:aws:ec2:*:*:snapshot/*"
+              ]
+            },
+            {
+              "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:DescribeTags",
+                "ec2:CreateSecurityGroup",
+                "ec2:CreateTags",
+                "ec2:DescribeAccountAttributes",
+                "ec2:DescribeInstances",
+                "ec2:DescribeRegions",
+                "ec2:DescribeRouteTables",
+                "ec2:DescribeSecurityGroups",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeTags",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeVolumesModifications",
+                "ec2:DescribeVpcs",
+                "elasticloadbalancing:DescribeListeners",
+                "elasticloadbalancing:DescribeLoadBalancerAttributes",
+                "elasticloadbalancing:DescribeLoadBalancerPolicies",
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "elasticloadbalancing:DescribeTargetGroups",
+                "elasticloadbalancing:DescribeTargetHealth",
+                "iam:GetServerCertificate",
+                "iam:ListServerCertificates",
+                "kms:DescribeKey",
+                "kms:GenerateRandom"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            },
+            {
+              "Action": [
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:TerminateInstanceInAutoScalingGroup",
+                "ec2:AttachVolume",
+                "ec2:AuthorizeSecurityGroupIngress",
+                "ec2:DeleteRoute",
+                "ec2:DeleteSecurityGroup",
+                "ec2:DeleteVolume",
+                "ec2:DetachVolume",
+                "ec2:ModifyInstanceAttribute",
+                "ec2:ModifyVolume",
+                "ec2:RevokeSecurityGroupIngress",
+                "elasticloadbalancing:AddTags",
+                "elasticloadbalancing:ApplySecurityGroupsToLoadBalancer",
+                "elasticloadbalancing:AttachLoadBalancerToSubnets",
+                "elasticloadbalancing:ConfigureHealthCheck",
+                "elasticloadbalancing:DeleteListener",
+                "elasticloadbalancing:DeleteLoadBalancer",
+                "elasticloadbalancing:DeleteLoadBalancerListeners",
+                "elasticloadbalancing:DeleteTargetGroup",
+                "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                "elasticloadbalancing:DeregisterTargets",
+                "elasticloadbalancing:DetachLoadBalancerFromSubnets",
+                "elasticloadbalancing:ModifyListener",
+                "elasticloadbalancing:ModifyLoadBalancerAttributes",
+                "elasticloadbalancing:ModifyTargetGroup",
+                "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                "elasticloadbalancing:RegisterTargets",
+                "elasticloadbalancing:SetLoadBalancerPoliciesForBackendServer",
+                "elasticloadbalancing:SetLoadBalancerPoliciesOfListener"
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/KubernetesCluster": "private-shared-ip.example.com"
+                }
+              },
+              "Effect": "Allow",
+              "Resource": "*"
             }
           ],
           "Version": "2012-10-17"
@@ -1588,20 +1728,39 @@
           "Statement": [
             {
               "Action": [
-                "ec2:DescribeInstances",
-                "ec2:DescribeRegions"
+                "s3:Get*"
               ],
               "Effect": "Allow",
               "Resource": [
-                "*"
+                "arn:aws:s3:::placeholder-read-bucket/clusters.example.com/private-shared-ip.example.com/addons/*",
+                "arn:aws:s3:::placeholder-read-bucket/clusters.example.com/private-shared-ip.example.com/cluster-completed.spec",
+                "arn:aws:s3:::placeholder-read-bucket/clusters.example.com/private-shared-ip.example.com/igconfig/node/*",
+                "arn:aws:s3:::placeholder-read-bucket/clusters.example.com/private-shared-ip.example.com/pki/ssh/*",
+                "arn:aws:s3:::placeholder-read-bucket/clusters.example.com/private-shared-ip.example.com/secrets/dockerconfig"
               ]
             },
             {
-              "Action": "autoscaling:DescribeAutoScalingInstances",
+              "Action": [
+                "s3:GetBucketLocation",
+                "s3:GetEncryptionConfiguration",
+                "s3:ListBucket",
+                "s3:ListBucketVersions"
+              ],
               "Effect": "Allow",
               "Resource": [
-                "*"
+                "arn:aws:s3:::placeholder-read-bucket"
               ]
+            },
+            {
+              "Action": [
+                "autoscaling:DescribeAutoScalingInstances",
+                "ec2:DescribeInstances",
+                "iam:GetServerCertificate",
+                "iam:ListServerCertificates",
+                "kms:GenerateRandom"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
             }
           ],
           "Version": "2012-10-17"

@@ -25,12 +25,13 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type Network struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 	Mode      string
 
 	CIDR *string
@@ -45,7 +46,7 @@ func (e *Network) CompareWithID() *string {
 func (e *Network) Find(c *fi.Context) (*Network, error) {
 	cloud := c.Cloud.(gce.GCECloud)
 
-	r, err := cloud.Compute().Networks.Get(cloud.Project(), *e.Name).Do()
+	r, err := cloud.Compute().Networks().Get(cloud.Project(), *e.Name)
 	if err != nil {
 		if gce.IsNotFound(err) {
 			return nil, nil
@@ -132,8 +133,13 @@ func (_ *Network) RenderGCE(t *gce.GCEAPITarget, a, e, changes *Network) error {
 
 		case "custom":
 			network.AutoCreateSubnetworks = false
+			// The boolean default value of "false" is omitted when the struct
+			// is serialized, which results in the network being created with
+			// the auto-create subnetworks default of "true". Explicitly send
+			// the default value.
+			network.ForceSendFields = []string{"AutoCreateSubnetworks"}
 		}
-		_, err := t.Cloud.Compute().Networks.Insert(t.Cloud.Project(), network).Do()
+		_, err := t.Cloud.Compute().Networks().Insert(t.Cloud.Project(), network)
 		if err != nil {
 			return fmt.Errorf("error creating Network: %v", err)
 		}
@@ -175,6 +181,6 @@ func (_ *Network) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *N
 	return t.RenderResource("google_compute_network", *e.Name, tf)
 }
 
-func (i *Network) TerraformName() *terraform.Literal {
-	return terraform.LiteralProperty("google_compute_network", *i.Name, "name")
+func (i *Network) TerraformName() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("google_compute_network", *i.Name, "name")
 }

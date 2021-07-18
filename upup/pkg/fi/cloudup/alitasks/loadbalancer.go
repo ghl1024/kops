@@ -23,6 +23,7 @@ import (
 	"github.com/denverdino/aliyungo/common"
 	"github.com/denverdino/aliyungo/slb"
 	"k8s.io/klog/v2"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/aliup"
@@ -37,7 +38,7 @@ type LoadBalancer struct {
 	AddressType         *string
 	VSwitchId           *string
 	LoadBalancerAddress *string
-	Lifecycle           *fi.Lifecycle
+	Lifecycle           fi.Lifecycle
 	Tags                map[string]string
 	ForAPIServer        bool
 }
@@ -264,6 +265,6 @@ func (_ *LoadBalancer) RenderTerraform(t *terraform.TerraformTarget, a, e, chang
 	return t.RenderResource("alicloud_slb", *e.Name, tf)
 }
 
-func (l *LoadBalancer) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("alicloud_slb", *l.Name, "id")
+func (l *LoadBalancer) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("alicloud_slb", *l.Name, "id")
 }

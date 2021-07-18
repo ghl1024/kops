@@ -26,17 +26,25 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	kopsbase "k8s.io/kops"
 	"k8s.io/kops/cmd/kops/util"
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
+	kopsutil "k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/pkg/apis/kops/validation"
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/pkg/clusteraddons"
 	"k8s.io/kops/pkg/commands"
+	"k8s.io/kops/pkg/commands/commandutils"
 	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/pkg/kubeconfig"
 	"k8s.io/kops/pkg/kubemanifest"
@@ -70,10 +78,12 @@ type CreateClusterOptions struct {
 	// SSHPublicKeys is a map of the SSH public keys we should configure; required on AWS, not required on GCE
 	SSHPublicKeys map[string][]byte
 
-	// Overrides allows settings values direct in the spec
-	Overrides []string
+	// Sets allows setting values directly in the spec.
+	Sets []string
+	// Unsets allows unsetting values directly in the spec.
+	Unsets []string
 
-	// Specify tags for AWS instance groups
+	// CloudLabels are cloud-provider-level tags for instance groups and volumes.
 	CloudLabels string
 
 	// Specify tenancy (default or dedicated) for masters and nodes
@@ -99,13 +109,11 @@ func (o *CreateClusterOptions) InitDefaults() {
 
 	o.Yes = false
 	o.Target = cloudup.TargetDirect
-
-	o.ContainerRuntime = "containerd"
 }
 
 var (
 	createClusterLong = templates.LongDesc(i18n.T(`
-	Create a kubernetes cluster using command line flags.
+	Create a Kubernetes cluster using command line flags.
 	This command creates cloud based resources such as networks and virtual machines. Once
 	the infrastructure is in place Kubernetes is installed on the virtual machines.
 
@@ -119,7 +127,7 @@ var (
 		--zones=us-east-1a \
 		--node-count=2
 
-	# Create a cluster in AWS with HA masters. This cluster
+	# Create a cluster in AWS with High Availability masters. This cluster
 	# has also been configured for private networking in a kops-managed VPC.
 	# The bastion flag is set to create an entrypoint for admins to SSH.
 	export KOPS_STATE_STORE="s3://my-state-store"
@@ -137,12 +145,11 @@ var (
 		--bastion="true" \
 		--yes
 
-	# Create a cluster in GCE.
-	# Note: GCE support is not GA.
-	export KOPS_FEATURE_FLAGS=AlphaAllowGCE
-	export KOPS_STATE_STORE="gs://my-state-store"
-	export ZONES="us-east1-a,us-east1-b,us-east1-c"
+	# Create a cluster in Digital Ocean.
+	export KOPS_STATE_STORE="do://my-state-store"
+	export ZONES="NYC1"
 	kops create cluster k8s-cluster.example.com \
+		--cloud digitalocean \
 		--zones $ZONES \
 		--master-zones $ZONES \
 		--node-count 3 \
@@ -170,12 +177,14 @@ func NewCmdCreateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 	encryptEtcdStorage := false
 
 	cmd := &cobra.Command{
-		Use:     "cluster",
-		Short:   createClusterShort,
-		Long:    createClusterLong,
-		Example: createClusterExample,
-		Run: func(cmd *cobra.Command, args []string) {
-			ctx := context.TODO()
+		Use:               "cluster [CLUSTER]",
+		Short:             createClusterShort,
+		Long:              createClusterLong,
+		Example:           createClusterExample,
+		Args:              rootCommand.clusterNameArgsNoKubeconfig(&options.ClusterName),
+		ValidArgsFunction: cobra.NoFileCompletions,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var err error
 
 			if cmd.Flag("associate-public-ip").Changed {
 				options.AssociatePublicIP = &associatePublicIP
@@ -185,152 +194,244 @@ func NewCmdCreateCluster(f *util.Factory, out io.Writer) *cobra.Command {
 				options.EncryptEtcdStorage = &encryptEtcdStorage
 			}
 
-			err := rootCommand.ProcessArgs(args)
-			if err != nil {
-				exitWithError(err)
-				return
-			}
-
-			options.ClusterName = rootCommand.clusterName
-
 			if sshPublicKey != "" {
 				options.SSHPublicKeys, err = loadSSHPublicKeys(sshPublicKey)
 				if err != nil {
-					exitWithError(fmt.Errorf("error reading SSH key file %q: %v", sshPublicKey, err))
+					return fmt.Errorf("error reading SSH key file %q: %v", sshPublicKey, err)
 				}
 			}
 
-			err = RunCreateCluster(ctx, f, out, options)
-			if err != nil {
-				exitWithError(err)
-			}
+			return RunCreateCluster(context.TODO(), f, out, options)
 		},
 	}
 
 	cmd.Flags().BoolVarP(&options.Yes, "yes", "y", options.Yes, "Specify --yes to immediately create the cluster")
 	cmd.Flags().StringVar(&options.Target, "target", options.Target, fmt.Sprintf("Valid targets: %s, %s, %s. Set this flag to %s if you want kOps to generate terraform", cloudup.TargetDirect, cloudup.TargetTerraform, cloudup.TargetCloudformation, cloudup.TargetTerraform))
+	cmd.RegisterFlagCompletionFunc("target", completeTarget)
 
 	// Configuration / state location
 	if featureflag.EnableSeparateConfigBase.Enabled() {
 		cmd.Flags().StringVar(&options.ConfigBase, "config-base", options.ConfigBase, "A cluster-readable location where we mirror configuration information, separate from the state store.  Allows for a state store that is not accessible from the cluster.")
+		cmd.RegisterFlagCompletionFunc("config-base", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			// TODO complete vfs paths
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		})
 	}
 
-	cmd.Flags().StringVar(&options.CloudProvider, "cloud", options.CloudProvider, "Cloud provider to use - gce, aws, openstack")
+	cmd.Flags().StringVar(&options.CloudProvider, "cloud", options.CloudProvider, fmt.Sprintf("Cloud provider to use - %s", strings.Join(cloudup.SupportedClouds(), ", ")))
+	cmd.RegisterFlagCompletionFunc("cloud", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return cloudup.SupportedClouds(), cobra.ShellCompDirectiveNoFileComp
+	})
 
 	cmd.Flags().StringSliceVar(&options.Zones, "zones", options.Zones, "Zones in which to run the cluster")
+	cmd.RegisterFlagCompletionFunc("zones", completeZone)
 	cmd.Flags().StringSliceVar(&options.MasterZones, "master-zones", options.MasterZones, "Zones in which to run masters (must be an odd number)")
+	cmd.RegisterFlagCompletionFunc("master-zones", completeZone)
 
 	if featureflag.ClusterAddons.Enabled() {
 		cmd.Flags().StringSliceVar(&options.AddonPaths, "add", options.AddonPaths, "Paths to addons we should add to the cluster")
+		// TODO complete VFS paths
 	}
 
 	cmd.Flags().StringVar(&options.KubernetesVersion, "kubernetes-version", options.KubernetesVersion, "Version of kubernetes to run (defaults to version in channel)")
+	cmd.RegisterFlagCompletionFunc("kubernetes-version", completeKubernetesVersion)
 
 	cmd.Flags().StringVar(&options.ContainerRuntime, "container-runtime", options.ContainerRuntime, "Container runtime to use: containerd, docker")
+	cmd.RegisterFlagCompletionFunc("container-runtime", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"containerd", "docker"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
-	cmd.Flags().StringVar(&sshPublicKey, "ssh-public-key", sshPublicKey, "SSH public key to use (defaults to ~/.ssh/id_rsa.pub on AWS)")
+	cmd.Flags().StringVar(&sshPublicKey, "ssh-public-key", sshPublicKey, "SSH public key to use")
+	cmd.RegisterFlagCompletionFunc("ssh-public-key", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"pub"}, cobra.ShellCompDirectiveFilterFileExt
+	})
 
-	cmd.Flags().Int32Var(&options.MasterCount, "master-count", options.MasterCount, "Set number of masters. Defaults to one master per master-zone")
-	cmd.Flags().Int32Var(&options.NodeCount, "node-count", options.NodeCount, "Set total number of nodes. Defaults to one node per zone")
+	cmd.Flags().Int32Var(&options.MasterCount, "master-count", options.MasterCount, "Number of masters. Defaults to one master per master-zone")
+	cmd.Flags().Int32Var(&options.NodeCount, "node-count", options.NodeCount, "Total number of worker nodes. Defaults to one node per zone")
 
-	cmd.Flags().StringVar(&options.Image, "image", options.Image, "Set image for all instances.")
-	cmd.Flags().StringVar(&options.NodeImage, "node-image", options.NodeImage, "Set image for nodes. Takes precedence over --image")
-	cmd.Flags().StringVar(&options.MasterImage, "master-image", options.MasterImage, "Set image for masters. Takes precedence over --image")
+	cmd.Flags().StringVar(&options.Image, "image", options.Image, "Machine image for all instances")
+	cmd.RegisterFlagCompletionFunc("image", completeInstanceImage)
+	cmd.Flags().StringVar(&options.NodeImage, "node-image", options.NodeImage, "Machine image for worker nodes. Takes precedence over --image")
+	cmd.RegisterFlagCompletionFunc("node-image", completeInstanceImage)
+	cmd.Flags().StringVar(&options.MasterImage, "master-image", options.MasterImage, "Machine image for masters. Takes precedence over --image")
+	cmd.RegisterFlagCompletionFunc("master-image", completeInstanceImage)
 
-	cmd.Flags().StringVar(&options.NodeSize, "node-size", options.NodeSize, "Set instance size for nodes")
-	cmd.Flags().StringVar(&options.MasterSize, "master-size", options.MasterSize, "Set instance size for masters")
+	cmd.Flags().StringVar(&options.NodeSize, "node-size", options.NodeSize, "Machine type for worker nodes")
+	cmd.RegisterFlagCompletionFunc("node-size", completeMachineType)
+	cmd.Flags().StringVar(&options.MasterSize, "master-size", options.MasterSize, "Machine type for masters")
+	cmd.RegisterFlagCompletionFunc("master-size", completeMachineType)
 
-	cmd.Flags().Int32Var(&options.MasterVolumeSize, "master-volume-size", options.MasterVolumeSize, "Set instance volume size (in GB) for masters")
-	cmd.Flags().Int32Var(&options.NodeVolumeSize, "node-volume-size", options.NodeVolumeSize, "Set instance volume size (in GB) for nodes")
+	cmd.Flags().Int32Var(&options.MasterVolumeSize, "master-volume-size", options.MasterVolumeSize, "Instance volume size (in GB) for masters")
+	cmd.Flags().Int32Var(&options.NodeVolumeSize, "node-volume-size", options.NodeVolumeSize, "Instance volume size (in GB) for worker nodes")
 
-	cmd.Flags().StringVar(&options.NetworkID, "vpc", options.NetworkID, "Set to use a shared VPC")
-	cmd.Flags().StringSliceVar(&options.SubnetIDs, "subnets", options.SubnetIDs, "Set to use shared subnets")
-	cmd.Flags().StringSliceVar(&options.UtilitySubnetIDs, "utility-subnets", options.UtilitySubnetIDs, "Set to use shared utility subnets")
-	cmd.Flags().StringVar(&options.NetworkCIDR, "network-cidr", options.NetworkCIDR, "Set to override the default network CIDR")
-	cmd.Flags().BoolVar(&options.DisableSubnetTags, "disable-subnet-tags", options.DisableSubnetTags, "Set to disable automatic subnet tagging")
+	cmd.Flags().StringVar(&options.NetworkID, "vpc", options.NetworkID, "Shared VPC to use")
+	cmd.RegisterFlagCompletionFunc("vpc", completeNetworkID)
+	cmd.Flags().StringSliceVar(&options.SubnetIDs, "subnets", options.SubnetIDs, "Shared subnets to use")
+	cmd.RegisterFlagCompletionFunc("subnets", completeSubnetID(options))
+	cmd.Flags().StringSliceVar(&options.UtilitySubnetIDs, "utility-subnets", options.UtilitySubnetIDs, "Shared utility subnets to use")
+	cmd.RegisterFlagCompletionFunc("utility-subnets", completeSubnetID(options))
+	cmd.Flags().StringVar(&options.NetworkCIDR, "network-cidr", options.NetworkCIDR, "Network CIDR to use")
+	cmd.RegisterFlagCompletionFunc("network-cidr", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
+	cmd.Flags().BoolVar(&options.DisableSubnetTags, "disable-subnet-tags", options.DisableSubnetTags, "Disable automatic subnet tagging")
 
-	cmd.Flags().BoolVar(&encryptEtcdStorage, "encrypt-etcd-storage", false, "Generate key in aws kms and use it for encrypt etcd volumes")
-	cmd.Flags().StringVar(&options.EtcdStorageType, "etcd-storage-type", options.EtcdStorageType, "The default storage type for etc members")
+	cmd.Flags().BoolVar(&encryptEtcdStorage, "encrypt-etcd-storage", false, "Generate key in AWS KMS and use it for encrypt etcd volumes")
+	cmd.Flags().StringVar(&options.EtcdStorageType, "etcd-storage-type", options.EtcdStorageType, "The default storage type for etcd members")
+	cmd.RegisterFlagCompletionFunc("etcd-storage-type", completeStorageType)
 
-	cmd.Flags().StringVar(&options.Networking, "networking", options.Networking, "Networking mode to use.  kubenet, external, weave, flannel-vxlan (or flannel), flannel-udp, calico, canal, kube-router, amazonvpc, cilium, cilium-etcd, cni, lyftvpc.")
+	cmd.Flags().StringVar(&options.Networking, "networking", options.Networking, "Networking mode.  kubenet, external, weave, flannel-vxlan (or flannel), flannel-udp, calico, canal, kube-router, amazonvpc, cilium, cilium-etcd, cni, lyftvpc.")
+	cmd.RegisterFlagCompletionFunc("networking", completeNetworking(options))
 
-	cmd.Flags().StringVar(&options.DNSZone, "dns-zone", options.DNSZone, "DNS hosted zone to use (defaults to longest matching zone)")
+	cmd.Flags().StringVar(&options.DNSZone, "dns-zone", options.DNSZone, "DNS hosted zone (defaults to longest matching zone)")
+	cmd.RegisterFlagCompletionFunc("dns-zone", completeDNSZone(options))
 	cmd.Flags().StringVar(&options.OutDir, "out", options.OutDir, "Path to write any local output")
+	cmd.MarkFlagDirname("out")
 	cmd.Flags().StringSliceVar(&options.AdminAccess, "admin-access", options.AdminAccess, "Restrict API access to this CIDR.  If not set, access will not be restricted by IP.")
-	cmd.Flags().StringSliceVar(&options.SSHAccess, "ssh-access", options.SSHAccess, "Restrict SSH access to this CIDR.  If not set, access will not be restricted by IP. (default [0.0.0.0/0])")
+	cmd.RegisterFlagCompletionFunc("admin-access", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
+	cmd.Flags().StringSliceVar(&options.SSHAccess, "ssh-access", options.SSHAccess, "Restrict SSH access to this CIDR.  If not set, uses the value of the admin-access flag.")
+	cmd.RegisterFlagCompletionFunc("ssh-access", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	// TODO: Can we deprecate this flag - it is awkward?
 	cmd.Flags().BoolVar(&associatePublicIP, "associate-public-ip", false, "Specify --associate-public-ip=[true|false] to enable/disable association of public IP for master ASG and nodes. Default is 'true'.")
 
-	cmd.Flags().StringSliceVar(&options.NodeSecurityGroups, "node-security-groups", options.NodeSecurityGroups, "Add precreated additional security groups to nodes.")
-	cmd.Flags().StringSliceVar(&options.MasterSecurityGroups, "master-security-groups", options.MasterSecurityGroups, "Add precreated additional security groups to masters.")
+	if featureflag.AWSIPv6.Enabled() {
+		cmd.Flags().BoolVar(&options.IPv6, "ipv6", false, "Allocate IPv6 CIDRs to subnets for clusters with public topology (AWS only)")
+	}
+
+	cmd.Flags().StringSliceVar(&options.NodeSecurityGroups, "node-security-groups", options.NodeSecurityGroups, "Additional precreated security groups to add to worker nodes.")
+	cmd.RegisterFlagCompletionFunc("node-security-groups", completeSecurityGroup)
+	cmd.Flags().StringSliceVar(&options.MasterSecurityGroups, "master-security-groups", options.MasterSecurityGroups, "Additional precreated security groups to add to masters.")
+	cmd.RegisterFlagCompletionFunc("master-security-groups", completeSecurityGroup)
 
 	cmd.Flags().StringVar(&options.Channel, "channel", options.Channel, "Channel for default versions and configuration to use")
+	cmd.RegisterFlagCompletionFunc("channel", completeChannel)
 
 	// Network topology
-	cmd.Flags().StringVarP(&options.Topology, "topology", "t", options.Topology, "Controls network topology for the cluster: public|private.")
+	cmd.Flags().StringVarP(&options.Topology, "topology", "t", options.Topology, "Network topology for the cluster: public or private")
+	cmd.RegisterFlagCompletionFunc("topology", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{api.TopologyPublic, api.TopologyPrivate}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	// Authorization
-	cmd.Flags().StringVar(&options.Authorization, "authorization", options.Authorization, "Authorization mode to use: "+cloudup.AuthorizationFlagAlwaysAllow+" or "+cloudup.AuthorizationFlagRBAC)
+	cmd.Flags().StringVar(&options.Authorization, "authorization", options.Authorization, "Authorization mode: "+cloudup.AuthorizationFlagAlwaysAllow+" or "+cloudup.AuthorizationFlagRBAC)
+	cmd.RegisterFlagCompletionFunc("authorization", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{cloudup.AuthorizationFlagAlwaysAllow, cloudup.AuthorizationFlagRBAC}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	// DNS
-	cmd.Flags().StringVar(&options.DNSType, "dns", options.DNSType, "DNS hosted zone to use: public|private.")
+	cmd.Flags().StringVar(&options.DNSType, "dns", options.DNSType, "DNS type to use: public or private")
+	cmd.RegisterFlagCompletionFunc("dns", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"public", "private"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	// Bastion
-	cmd.Flags().BoolVar(&options.Bastion, "bastion", options.Bastion, "Pass the --bastion flag to enable a bastion instance group. Only applies to private topology.")
+	cmd.Flags().BoolVar(&options.Bastion, "bastion", options.Bastion, "Enable a bastion instance group. Only applies to private topology.")
 
 	// Allow custom tags from the CLI
-	cmd.Flags().StringVar(&options.CloudLabels, "cloud-labels", options.CloudLabels, "A list of KV pairs used to tag all instance groups in AWS (e.g. \"Owner=John Doe,Team=Some Team\").")
+	cmd.Flags().StringVar(&options.CloudLabels, "cloud-labels", options.CloudLabels, "A list of key/value pairs used to tag all instance groups (for example \"Owner=John Doe,Team=Some Team\").")
+	cmd.RegisterFlagCompletionFunc("cloud-labels", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	// Master and Node Tenancy
-	cmd.Flags().StringVar(&options.MasterTenancy, "master-tenancy", options.MasterTenancy, "The tenancy of the master group on AWS. Can either be default or dedicated.")
-	cmd.Flags().StringVar(&options.NodeTenancy, "node-tenancy", options.NodeTenancy, "The tenancy of the node group on AWS. Can be either default or dedicated.")
+	cmd.Flags().StringVar(&options.MasterTenancy, "master-tenancy", options.MasterTenancy, "Tenancy of the master group (AWS only): default or dedicated")
+	cmd.RegisterFlagCompletionFunc("master-tenancy", completeTenancy)
+	cmd.Flags().StringVar(&options.NodeTenancy, "node-tenancy", options.NodeTenancy, "Tenancy of the node group (AWS only): default or dedicated")
+	cmd.RegisterFlagCompletionFunc("node-tenancy", completeTenancy)
 
-	cmd.Flags().StringVar(&options.APILoadBalancerClass, "api-loadbalancer-class", options.APILoadBalancerClass, "Currently only supported in AWS. Sets the API loadbalancer class to either 'classic' or 'network'")
-	cmd.Flags().StringVar(&options.APILoadBalancerType, "api-loadbalancer-type", options.APILoadBalancerType, "Sets the API loadbalancer type to either 'public' or 'internal'")
-	cmd.Flags().StringVar(&options.APISSLCertificate, "api-ssl-certificate", options.APISSLCertificate, "Currently only supported in AWS. Sets the ARN of the SSL Certificate to use for the API server loadbalancer.")
+	cmd.Flags().StringVar(&options.APILoadBalancerClass, "api-loadbalancer-class", options.APILoadBalancerClass, "Class of loadbalancer for the Kubernetes API (AWS only): classic or network")
+	cmd.RegisterFlagCompletionFunc("api-loadbalancer-class", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"classic", "network"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	cmd.Flags().StringVar(&options.APILoadBalancerType, "api-loadbalancer-type", options.APILoadBalancerType, "Type of loadbalancer for the Kubernetes API: public or internal")
+	cmd.RegisterFlagCompletionFunc("api-loadbalancer-type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"public", "internal"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	cmd.Flags().StringVar(&options.APISSLCertificate, "api-ssl-certificate", options.APISSLCertificate, "ARN of the SSL Certificate to use for the Kubernetes API loadbalancer (AWS only)")
+	cmd.RegisterFlagCompletionFunc("api-ssl-certificate", completeSSLCertificate)
 
 	// Allow custom public master name
-	cmd.Flags().StringVar(&options.MasterPublicName, "master-public-name", options.MasterPublicName, "Sets the public master public name")
+	cmd.Flags().StringVar(&options.MasterPublicName, "master-public-name", options.MasterPublicName, "Domain name of the public Kubernetes API")
+	cmd.RegisterFlagCompletionFunc("master-public-name", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	// DryRun mode that will print YAML or JSON
 	cmd.Flags().BoolVar(&options.DryRun, "dry-run", options.DryRun, "If true, only print the object that would be sent, without sending it. This flag can be used to create a cluster YAML or JSON manifest.")
-	cmd.Flags().StringVarP(&options.Output, "output", "o", options.Output, "Output format. One of json|yaml. Used with the --dry-run flag.")
+	cmd.Flags().StringVarP(&options.Output, "output", "o", options.Output, "Output format. One of json or yaml. Used with the --dry-run flag.")
+	cmd.RegisterFlagCompletionFunc("output", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"json", "yaml"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	if featureflag.SpecOverrideFlag.Enabled() {
-		cmd.Flags().StringSliceVar(&options.Overrides, "override", options.Overrides, "Directly configure values in the spec")
+		cmd.Flags().StringSliceVar(&options.Sets, "set", options.Sets, "Directly set values in the spec")
+		cmd.RegisterFlagCompletionFunc("set", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		})
+		cmd.Flags().StringSliceVar(&options.Unsets, "unset", options.Unsets, "Directly unset values in the spec")
+		cmd.RegisterFlagCompletionFunc("unset", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		})
 	}
 
 	// GCE flags
 	cmd.Flags().StringVar(&options.Project, "project", options.Project, "Project to use (must be set on GCE)")
+	cmd.RegisterFlagCompletionFunc("project", completeProject)
 	cmd.Flags().StringVar(&options.GCEServiceAccount, "gce-service-account", options.GCEServiceAccount, "Service account with which the GCE VM runs. Warning: if not set, VMs will run as default compute service account.")
+	cmd.RegisterFlagCompletionFunc("gce-service-account", completeGCEServiceAccount)
 
 	if featureflag.Azure.Enabled() {
-		cmd.Flags().StringVar(&options.AzureSubscriptionID, "azure-subscription-id", options.AzureSubscriptionID, "Azure subscription where the cluster is created.")
+		cmd.Flags().StringVar(&options.AzureSubscriptionID, "azure-subscription-id", options.AzureSubscriptionID, "Azure subscription where the cluster is created")
+		cmd.RegisterFlagCompletionFunc("azure-subscription-id", completeAzureSubscriptionID)
 		cmd.Flags().StringVar(&options.AzureTenantID, "azure-tenant-id", options.AzureTenantID, "Azure tenant where the cluster is created.")
+		cmd.RegisterFlagCompletionFunc("azure-tenant-id", completeAzureTenantID)
 		cmd.Flags().StringVar(&options.AzureResourceGroupName, "azure-resource-group-name", options.AzureResourceGroupName, "Azure resource group name where the cluster is created. The resource group will be created if it doesn't already exist. Defaults to the cluster name.")
+		cmd.RegisterFlagCompletionFunc("azure-resource-group-name", completeAzureResourceGroupName)
 		cmd.Flags().StringVar(&options.AzureRouteTableName, "azure-route-table-name", options.AzureRouteTableName, "Azure route table name where the cluster is created.")
+		cmd.RegisterFlagCompletionFunc("azure-route-table-name", completeAzureRouteTableName)
 		cmd.Flags().StringVar(&options.AzureAdminUser, "azure-admin-user", options.AzureAdminUser, "Azure admin user of VM ScaleSet.")
+		cmd.RegisterFlagCompletionFunc("azure-admin-user", completeAzureAdminUsers)
 	}
 
 	if featureflag.Spotinst.Enabled() {
 		// Spotinst flags
-		cmd.Flags().StringVar(&options.SpotinstProduct, "spotinst-product", options.SpotinstProduct, "Set the product description (valid values: Linux/UNIX, Linux/UNIX (Amazon VPC), Windows and Windows (Amazon VPC))")
-		cmd.Flags().StringVar(&options.SpotinstOrientation, "spotinst-orientation", options.SpotinstOrientation, "Set the prediction strategy (valid values: balanced, cost, equal-distribution and availability)")
+		cmd.Flags().StringVar(&options.SpotinstProduct, "spotinst-product", options.SpotinstProduct, "Product description (valid values: Linux/UNIX, Linux/UNIX (Amazon VPC), Windows and Windows (Amazon VPC))")
+		cmd.RegisterFlagCompletionFunc("spotinst-product", completeSpotinstProduct)
+		cmd.Flags().StringVar(&options.SpotinstOrientation, "spotinst-orientation", options.SpotinstOrientation, "Prediction strategy (valid values: balanced, cost, equal-distribution and availability)")
+		cmd.RegisterFlagCompletionFunc("spotinst-orientation", completeSpotinstOrientation)
 	}
 
 	if featureflag.APIServerNodes.Enabled() {
-		cmd.Flags().Int32Var(&options.APIServerCount, "api-server-count", options.APIServerCount, "Set number of API server nodes. Defaults to 0.")
+		cmd.Flags().Int32Var(&options.APIServerCount, "api-server-count", options.APIServerCount, "Number of API server nodes. Defaults to 0.")
 	}
 
 	// Openstack flags
-	cmd.Flags().StringVar(&options.OpenstackExternalNet, "os-ext-net", options.OpenstackExternalNet, "The name of the external network to use with the openstack router")
-	cmd.Flags().StringVar(&options.OpenstackExternalSubnet, "os-ext-subnet", options.OpenstackExternalSubnet, "The name of the external floating subnet to use with the openstack router")
-	cmd.Flags().StringVar(&options.OpenstackLBSubnet, "os-lb-floating-subnet", options.OpenstackLBSubnet, "The name of the external subnet to use with the kubernetes api")
-	cmd.Flags().BoolVar(&options.OpenstackStorageIgnoreAZ, "os-kubelet-ignore-az", options.OpenstackStorageIgnoreAZ, "If true kubernetes may attach volumes across availability zones")
-	cmd.Flags().BoolVar(&options.OpenstackLBOctavia, "os-octavia", options.OpenstackLBOctavia, "If true octavia loadbalancer api will be used")
+	cmd.Flags().StringVar(&options.OpenstackExternalNet, "os-ext-net", options.OpenstackExternalNet, "External network to use with the openstack router")
+	cmd.RegisterFlagCompletionFunc("os-ext-net", completeOpenstackExternalNet)
+	cmd.Flags().StringVar(&options.OpenstackExternalSubnet, "os-ext-subnet", options.OpenstackExternalSubnet, "External floating subnet to use with the openstack router")
+	cmd.RegisterFlagCompletionFunc("os-ext-subnet", completeOpenstackExternalSubnet)
+	cmd.Flags().StringVar(&options.OpenstackLBSubnet, "os-lb-floating-subnet", options.OpenstackLBSubnet, "External subnet to use with the kubernetes api")
+	cmd.RegisterFlagCompletionFunc("os-lb-floating-subnet", completeOpenstackLBSubnet)
+	cmd.Flags().BoolVar(&options.OpenstackStorageIgnoreAZ, "os-kubelet-ignore-az", options.OpenstackStorageIgnoreAZ, "Attach volumes across availability zones")
+	cmd.Flags().BoolVar(&options.OpenstackLBOctavia, "os-octavia", options.OpenstackLBOctavia, "Use octavia loadbalancer API")
 	cmd.Flags().StringVar(&options.OpenstackDNSServers, "os-dns-servers", options.OpenstackDNSServers, "comma separated list of DNS Servers which is used in network")
-	cmd.Flags().StringVar(&options.OpenstackNetworkID, "os-network", options.OpenstackNetworkID, "The ID of the existing OpenStack network to use")
+	cmd.RegisterFlagCompletionFunc("os-dns-servers", completeOpenstackDNSServers)
+	cmd.Flags().StringVar(&options.OpenstackNetworkID, "os-network", options.OpenstackNetworkID, "ID of the existing OpenStack network to use")
+	cmd.RegisterFlagCompletionFunc("os-network", completeOpenstackNetworkID)
+
+	cmd.Flags().SetNormalizeFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
+		switch name {
+		case "override":
+			name = "set"
+		}
+		return pflag.NormalizedName(name)
+	})
+
 	return cmd
 }
 
@@ -508,7 +609,10 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		cluster.Spec.MasterPublicName = c.MasterPublicName
 	}
 
-	if err := commands.SetClusterFields(c.Overrides, cluster); err != nil {
+	if err := commands.UnsetClusterFields(c.Unsets, cluster); err != nil {
+		return err
+	}
+	if err := commands.SetClusterFields(c.Sets, cluster); err != nil {
 		return err
 	}
 
@@ -528,7 +632,7 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		return err
 	}
 
-	assetBuilder := assets.NewAssetBuilder(cluster, "")
+	assetBuilder := assets.NewAssetBuilder(cluster, false)
 	fullCluster, err := cloudup.PopulateClusterSpec(clientset, cluster, cloud, assetBuilder)
 	if err != nil {
 		return err
@@ -593,20 +697,10 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		return fmt.Errorf("error writing updated configuration: %v", err)
 	}
 
-	configBase, err := clientset.ConfigBaseFor(cluster)
-	if err != nil {
-		return fmt.Errorf("error building ConfigBase for cluster: %v", err)
-	}
-	err = registry.WriteConfigDeprecated(cluster, configBase.Join(registry.PathClusterCompleted), fullCluster)
-	if err != nil {
-		return fmt.Errorf("error writing completed cluster spec: %v", err)
-	}
-
 	if len(c.SSHPublicKeys) == 0 {
 		autoloadSSHPublicKeys := true
 		switch c.CloudProvider {
-		case "gce":
-			// We don't normally use SSH keys on GCE
+		case "gce", "aws":
 			autoloadSSHPublicKeys = false
 		}
 
@@ -653,12 +747,13 @@ func RunCreateCluster(ctx context.Context, f *util.Factory, out io.Writer, c *Cr
 		updateClusterOptions.Target = c.Target
 		updateClusterOptions.OutDir = c.OutDir
 		updateClusterOptions.admin = kubeconfig.DefaultKubecfgAdminLifetime
+		updateClusterOptions.ClusterName = cluster.Name
 		updateClusterOptions.CreateKubecfg = true
 
 		// SSHPublicKey has already been mapped
 		updateClusterOptions.SSHPublicKey = ""
 
-		_, err := RunUpdateCluster(ctx, f, cluster.Name, out, updateClusterOptions)
+		_, err := RunUpdateCluster(ctx, f, out, updateClusterOptions)
 		if err != nil {
 			return err
 		}
@@ -730,4 +825,223 @@ func loadSSHPublicKeys(sshPublicKey string) (map[string][]byte, error) {
 		klog.Infof("Using SSH public key: %v\n", sshPublicKey)
 	}
 	return sshPublicKeys, nil
+}
+
+func completeZone(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of valid zones
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeKubernetesVersion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	kopsVersion, err := kopsutil.ParseKubernetesVersion(kopsbase.KOPS_RELEASE_VERSION)
+	if err != nil {
+		commandutils.CompletionError("parsing kops version", err)
+	}
+	tooNewVersion := kopsVersion
+	tooNewVersion.Minor++
+	tooNewVersion.Pre = nil
+	tooNewVersion.Build = nil
+
+	repo, err := name.NewRepository("k8s.gcr.io/kube-apiserver")
+	if err != nil {
+		return commandutils.CompletionError("parsing kube-apiserver repo", err)
+	}
+	tags, err := remote.List(repo)
+	if err != nil {
+		return commandutils.CompletionError("listing kube-apiserver tags", err)
+	}
+	versions := sets.NewString()
+	for _, tag := range tags {
+		parsed, err := kopsutil.ParseKubernetesVersion(tag)
+		if err != nil {
+			continue
+		}
+		if kopsutil.IsKubernetesGTE(cloudup.OldestSupportedKubernetesVersion, *parsed) &&
+			!kopsutil.IsKubernetesGTE(tooNewVersion.String(), *parsed) {
+			versions.Insert(parsed.String())
+		}
+	}
+
+	// Remove pre-release versions that have a subsequent stable version.
+	// Also remove the non-useful -rc.0 versions.
+	for _, version := range versions.UnsortedList() {
+		split := strings.Split(version, "-")
+		if len(split) > 1 && versions.Has(split[0]) {
+			versions.Delete(version)
+		}
+		if strings.HasSuffix(version, "-rc.0") {
+			versions.Delete(version)
+		}
+	}
+
+	return versions.List(), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeInstanceImage(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of valid images
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeMachineType(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of valid machine types
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeNetworkID(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of valid VPCs
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeSubnetID(options *CreateClusterOptions) func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// TODO call into cloud provider(s) to get list of valid Subnet IDs
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func completeStorageType(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of valid storage types
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeNetworking(options *CreateClusterOptions) func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		completions := []string{
+			"external",
+			"cni",
+			"calico",
+			"cilium",
+			"cilium-etcd",
+		}
+
+		if !options.IPv6 {
+			completions = append(completions,
+				"kubenet",
+				"kopeio",
+				"weave",
+				"flannel",
+				"canal",
+				"kube-router",
+			)
+
+			if options.CloudProvider == "aws" || options.CloudProvider == "" {
+				completions = append(completions, "amazonvpc", "lyftvpc")
+			}
+
+			if cloudup.AlphaAllowGCE.Enabled() && (options.CloudProvider == "gce" || options.CloudProvider == "") {
+				completions = append(completions, "gce")
+			}
+		}
+
+		return completions, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func completeDNSZone(options *CreateClusterOptions) func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		commandutils.ConfigureKlogForCompletion()
+
+		clusterName, completions, directive := GetClusterNameForCompletionNoKubeconfig(args)
+		if clusterName == "" {
+			return completions, directive
+		}
+
+		zone := clusterName
+		completions = nil
+		for {
+			split := strings.SplitN(zone, ".", 2)
+			if len(split) != 2 || !strings.Contains(split[1], ".") {
+				break
+			}
+			zone = split[1]
+			// TODO Verify the zone against the cloud's DNS provider?
+			completions = append(completions, zone)
+		}
+
+		return completions, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func completeSecurityGroup(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of valid Security groups
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeTenancy(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return ec2.Tenancy_Values(), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeSSLCertificate(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of certificates
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeProject(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider(s) to get list of projects
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeGCEServiceAccount(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of service accounts
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeAzureSubscriptionID(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of subscription IDs
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeAzureTenantID(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of tenant IDs
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeAzureResourceGroupName(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of resource group names
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeAzureRouteTableName(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of route table names
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeAzureAdminUsers(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of admin users
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeSpotinstProduct(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of products
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeSpotinstOrientation(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of orientations
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeOpenstackExternalNet(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of external networks
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeOpenstackExternalSubnet(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of external floating subnets
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeOpenstackLBSubnet(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of external subnets
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeOpenstackDNSServers(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of DNS servers
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeOpenstackNetworkID(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// TODO call into cloud provider to get list of network IDs
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }

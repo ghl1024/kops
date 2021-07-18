@@ -35,7 +35,16 @@ type SecurityGroup struct {
 	Description      *string
 	RemoveExtraRules []string
 	RemoveGroup      bool
-	Lifecycle        *fi.Lifecycle
+	Lifecycle        fi.Lifecycle
+}
+
+// SecurityGroupsByID implements sort.Interface based on the ID field.
+type SecurityGroupsByID []*SecurityGroup
+
+func (a SecurityGroupsByID) Len() int      { return len(a) }
+func (a SecurityGroupsByID) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a SecurityGroupsByID) Less(i, j int) bool {
+	return fi.StringValue(a[i].ID) < fi.StringValue(a[j].ID)
 }
 
 var _ fi.CompareWithID = &SecurityGroup{}

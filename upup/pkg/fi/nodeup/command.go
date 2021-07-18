@@ -18,17 +18,21 @@ package nodeup
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/service/kms"
 	"k8s.io/kops/nodeup/pkg/model"
 	"k8s.io/kops/nodeup/pkg/model/networking"
 	api "k8s.io/kops/pkg/apis/kops"
@@ -36,6 +40,7 @@ import (
 	"k8s.io/kops/pkg/apis/nodeup"
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/pkg/configserver"
+	"k8s.io/kops/pkg/kopscodecs"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/nodeup/cloudinit"
@@ -63,21 +68,20 @@ type NodeUpCommand struct {
 	ConfigLocation string
 	Target         string
 	cluster        *api.Cluster
-	config         *nodeup.Config
-	instanceGroup  *api.InstanceGroup
 }
 
 // Run is responsible for perform the nodeup process
 func (c *NodeUpCommand) Run(out io.Writer) error {
 	ctx := context.Background()
 
+	var bootConfig nodeup.BootConfig
 	if c.ConfigLocation != "" {
-		config, err := vfs.Context.ReadFile(c.ConfigLocation)
+		b, err := vfs.Context.ReadFile(c.ConfigLocation)
 		if err != nil {
 			return fmt.Errorf("error loading configuration %q: %v", c.ConfigLocation, err)
 		}
 
-		err = utils.YamlUnmarshal(config, &c.config)
+		err = utils.YamlUnmarshal(b, &bootConfig)
 		if err != nil {
 			return fmt.Errorf("error parsing configuration %q: %v", c.ConfigLocation, err)
 		}
@@ -89,91 +93,91 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 		return fmt.Errorf("CacheDir is required")
 	}
 
+	region, err := getRegion(ctx, &bootConfig)
+	if err != nil {
+		return err
+	}
+	if err = seedRNG(ctx, &bootConfig, region); err != nil {
+		return err
+	}
+
 	var configBase vfs.Path
 
 	// If we're using a config server instead of vfs, nodeConfig will hold our configuration
 	var nodeConfig *nodeup.NodeConfig
 
-	if c.config.ConfigServer != nil {
-		response, err := getNodeConfigFromServer(ctx, c.config.ConfigServer)
+	if bootConfig.ConfigServer != nil {
+		response, err := getNodeConfigFromServer(ctx, &bootConfig, region)
 		if err != nil {
 			return err
 		}
 		nodeConfig = response.NodeConfig
-	} else if fi.StringValue(c.config.ConfigBase) != "" {
+	} else if fi.StringValue(bootConfig.ConfigBase) != "" {
 		var err error
-		configBase, err = vfs.Context.BuildVfsPath(*c.config.ConfigBase)
+		configBase, err = vfs.Context.BuildVfsPath(*bootConfig.ConfigBase)
 		if err != nil {
-			return fmt.Errorf("cannot parse ConfigBase %q: %v", *c.config.ConfigBase, err)
-		}
-	} else if fi.StringValue(c.config.ClusterLocation) != "" {
-		basePath := *c.config.ClusterLocation
-		lastSlash := strings.LastIndex(basePath, "/")
-		if lastSlash != -1 {
-			basePath = basePath[0:lastSlash]
-		}
-
-		var err error
-		configBase, err = vfs.Context.BuildVfsPath(basePath)
-		if err != nil {
-			return fmt.Errorf("cannot parse inferred ConfigBase %q: %v", basePath, err)
+			return fmt.Errorf("cannot parse ConfigBase %q: %v", *bootConfig.ConfigBase, err)
 		}
 	} else {
 		return fmt.Errorf("ConfigBase or ConfigServer is required")
 	}
 
-	c.cluster = &api.Cluster{}
-	if nodeConfig != nil {
-		if err := utils.YamlUnmarshal([]byte(nodeConfig.ClusterFullConfig), c.cluster); err != nil {
-			return fmt.Errorf("error parsing Cluster config response: %w", err)
-		}
-	} else {
-		clusterLocation := fi.StringValue(c.config.ClusterLocation)
-
-		var p vfs.Path
-		if clusterLocation != "" {
-			var err error
-			p, err = vfs.Context.BuildVfsPath(clusterLocation)
-			if err != nil {
-				return fmt.Errorf("error parsing ClusterLocation %q: %v", clusterLocation, err)
-			}
+	{
+		var b []byte
+		var clusterDescription string
+		if nodeConfig != nil {
+			b = []byte(nodeConfig.ClusterFullConfig)
+			clusterDescription = "config response"
 		} else {
-			p = configBase.Join(registry.PathClusterCompleted)
+			p := configBase.Join(registry.PathClusterCompleted)
+			var err error
+
+			b, err = p.ReadFile()
+			if err != nil {
+				return fmt.Errorf("error loading Cluster %q: %v", p, err)
+			}
+			clusterDescription = fmt.Sprintf("%q", p)
 		}
 
-		b, err := p.ReadFile()
+		o, _, err := kopscodecs.Decode(b, nil)
 		if err != nil {
-			return fmt.Errorf("error loading Cluster %q: %v", p, err)
+			return fmt.Errorf("error parsing Cluster %s: %v", clusterDescription, err)
 		}
-
-		err = utils.YamlUnmarshal(b, c.cluster)
-		if err != nil {
-			return fmt.Errorf("error parsing Cluster %q: %v", p, err)
+		var ok bool
+		if c.cluster, ok = o.(*api.Cluster); !ok {
+			return fmt.Errorf("unexpected object type for Cluster %s: %T", clusterDescription, o)
 		}
 	}
 
+	var nodeupConfig nodeup.Config
+	var nodeupConfigHash [32]byte
 	if nodeConfig != nil {
-		c.instanceGroup = &api.InstanceGroup{}
-		if err := utils.YamlUnmarshal([]byte(nodeConfig.InstanceGroupConfig), c.instanceGroup); err != nil {
-			return fmt.Errorf("error parsing InstanceGroup config response: %v", err)
+		if err := utils.YamlUnmarshal([]byte(nodeConfig.NodeupConfig), &nodeupConfig); err != nil {
+			return fmt.Errorf("error parsing BootConfig config response: %v", err)
 		}
-	} else if c.config.InstanceGroupName != "" {
-		instanceGroupLocation := configBase.Join("instancegroup", c.config.InstanceGroupName)
+		nodeupConfigHash = sha256.Sum256([]byte(nodeConfig.NodeupConfig))
+		nodeupConfig.CAs[fi.CertificateIDCA] = bootConfig.ConfigServer.CACertificates
+	} else if bootConfig.InstanceGroupName != "" {
+		nodeupConfigLocation := configBase.Join("igconfig", strings.ToLower(string(bootConfig.InstanceGroupRole)), bootConfig.InstanceGroupName, "nodeupconfig.yaml")
 
-		c.instanceGroup = &api.InstanceGroup{}
-		b, err := instanceGroupLocation.ReadFile()
+		b, err := nodeupConfigLocation.ReadFile()
 		if err != nil {
-			return fmt.Errorf("error loading InstanceGroup %q: %v", instanceGroupLocation, err)
+			return fmt.Errorf("error loading NodeupConfig %q: %v", nodeupConfigLocation, err)
 		}
 
-		if err = utils.YamlUnmarshal(b, c.instanceGroup); err != nil {
-			return fmt.Errorf("error parsing InstanceGroup %q: %v", instanceGroupLocation, err)
+		if err = utils.YamlUnmarshal(b, &nodeupConfig); err != nil {
+			return fmt.Errorf("error parsing NodeupConfig %q: %v", nodeupConfigLocation, err)
 		}
+		nodeupConfigHash = sha256.Sum256(b)
 	} else {
-		klog.Warningf("No instance group defined in nodeup config")
+		return fmt.Errorf("no instance group defined in nodeup config")
 	}
 
-	err := evaluateSpec(c)
+	if bootConfig.NodeupConfigHash != base64.StdEncoding.EncodeToString(nodeupConfigHash[:]) {
+		return fmt.Errorf("nodeup config hash mismatch")
+	}
+
+	err = evaluateSpec(c, &nodeupConfig)
 	if err != nil {
 		return err
 	}
@@ -188,7 +192,7 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 		return fmt.Errorf("error determining OS distribution: %v", err)
 	}
 
-	configAssets := c.config.Assets[architecture]
+	configAssets := nodeupConfig.Assets[architecture]
 	assetStore := fi.NewAssetStore(c.CacheDir)
 	for _, asset := range configAssets {
 		err := assetStore.Add(asset)
@@ -200,28 +204,22 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 	var cloud fi.Cloud
 
 	if api.CloudProviderID(c.cluster.Spec.CloudProvider) == api.CloudProviderAWS {
-		region, err := awsup.FindRegion(c.cluster)
-		if err != nil {
-			return err
-		}
 		awsCloud, err := awsup.NewAWSCloud(region, nil)
-
-		cloud = awsCloud
-
 		if err != nil {
 			return err
 		}
+		cloud = awsCloud
 	}
 
 	modelContext := &model.NodeupModelContext{
-		Cloud:         cloud,
-		Architecture:  architecture,
-		Assets:        assetStore,
-		Cluster:       c.cluster,
-		ConfigBase:    configBase,
-		Distribution:  distribution,
-		InstanceGroup: c.instanceGroup,
-		NodeupConfig:  c.config,
+		Cloud:        cloud,
+		Architecture: architecture,
+		Assets:       assetStore,
+		Cluster:      c.cluster,
+		ConfigBase:   configBase,
+		Distribution: distribution,
+		BootConfig:   &bootConfig,
+		NodeupConfig: &nodeupConfig,
 	}
 
 	var secretStore fi.SecretStore
@@ -242,7 +240,7 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 	}
 
 	if nodeConfig != nil {
-		modelContext.KeyStore = configserver.NewKeyStore(nodeConfig)
+		modelContext.KeyStore = configserver.NewKeyStore()
 	} else if c.cluster.Spec.KeyStore != "" {
 		klog.Infof("Building KeyStore at %q", c.cluster.Spec.KeyStore)
 		p, err := vfs.Context.BuildVfsPath(c.cluster.Spec.KeyStore)
@@ -304,6 +302,7 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 	loader.Builders = append(loader.Builders, &model.EtcdManagerTLSBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.KubeProxyBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &model.KopsControllerBuilder{NodeupModelContext: modelContext})
+	loader.Builders = append(loader.Builders, &model.WarmPoolBuilder{NodeupModelContext: modelContext})
 
 	loader.Builders = append(loader.Builders, &networking.CommonBuilder{NodeupModelContext: modelContext})
 	loader.Builders = append(loader.Builders, &networking.CalicoBuilder{NodeupModelContext: modelContext})
@@ -317,7 +316,7 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 		return fmt.Errorf("error building loader: %v", err)
 	}
 
-	for i, image := range c.config.Images[architecture] {
+	for i, image := range nodeupConfig.Images[architecture] {
 		taskMap["LoadImage."+strconv.Itoa(i)] = &nodetasks.LoadImageTask{
 			Sources: image.Sources,
 			Hash:    image.Hash,
@@ -335,7 +334,7 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 			CacheDir: c.CacheDir,
 		}
 	case "dryrun":
-		assetBuilder := assets.NewAssetBuilder(c.cluster, "")
+		assetBuilder := assets.NewAssetBuilder(c.cluster, false)
 		target = fi.NewDryRunTarget(assetBuilder, out)
 	case "cloudinit":
 		checkExisting = false
@@ -363,10 +362,48 @@ func (c *NodeUpCommand) Run(out io.Writer) error {
 		klog.Exitf("error closing target: %v", err)
 	}
 
+	if nodeupConfig.EnableLifecycleHook {
+		if api.CloudProviderID(c.cluster.Spec.CloudProvider) == api.CloudProviderAWS {
+			err := completeWarmingLifecycleAction(cloud.(awsup.AWSCloud), modelContext)
+			if err != nil {
+				return fmt.Errorf("failed to complete lifecylce action: %w", err)
+			}
+		}
+	}
 	return nil
 }
 
-func evaluateSpec(c *NodeUpCommand) error {
+func completeWarmingLifecycleAction(cloud awsup.AWSCloud, modelContext *model.NodeupModelContext) error {
+	asgName := modelContext.BootConfig.InstanceGroupName + "." + modelContext.Cluster.GetName()
+	hookName := "kops-warmpool"
+	svc := cloud.(awsup.AWSCloud).Autoscaling()
+	hooks, err := svc.DescribeLifecycleHooks(&autoscaling.DescribeLifecycleHooksInput{
+		AutoScalingGroupName: &asgName,
+		LifecycleHookNames:   []*string{&hookName},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to find lifecycle hook %q: %w", hookName, err)
+	}
+
+	if len(hooks.LifecycleHooks) > 0 {
+		klog.Info("Found ASG lifecycle hook")
+		_, err := svc.CompleteLifecycleAction(&autoscaling.CompleteLifecycleActionInput{
+			AutoScalingGroupName:  &asgName,
+			InstanceId:            &modelContext.InstanceID,
+			LifecycleHookName:     &hookName,
+			LifecycleActionResult: fi.String("CONTINUE"),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to complete lifecycle hook %q for %q: %v", hookName, modelContext.InstanceID, err)
+		}
+		klog.Info("Lifecycle action completed")
+	} else {
+		klog.Info("No ASG lifecycle hook found")
+	}
+	return nil
+}
+
+func evaluateSpec(c *NodeUpCommand, nodeupConfig *nodeup.Config) error {
 	var err error
 
 	c.cluster.Spec.Kubelet.HostnameOverride, err = evaluateHostnameOverride(c.cluster.Spec.Kubelet.HostnameOverride)
@@ -379,7 +416,7 @@ func evaluateSpec(c *NodeUpCommand) error {
 		return err
 	}
 
-	c.config.KubeletConfig.HostnameOverride, err = evaluateHostnameOverride(c.config.KubeletConfig.HostnameOverride)
+	nodeupConfig.KubeletConfig.HostnameOverride, err = evaluateHostnameOverride(nodeupConfig.KubeletConfig.HostnameOverride)
 	if err != nil {
 		return err
 	}
@@ -628,38 +665,79 @@ func loadKernelModules(context *model.NodeupModelContext) error {
 	return nil
 }
 
-// getNodeConfigFromServer queries kops-controller for our node's configuration.
-func getNodeConfigFromServer(ctx context.Context, config *nodeup.ConfigServerOptions) (*nodeup.BootstrapResponse, error) {
-	var authenticator fi.Authenticator
-
-	switch api.CloudProviderID(config.CloudProvider) {
+// getRegion queries the cloud provider for the region.
+func getRegion(ctx context.Context, bootConfig *nodeup.BootConfig) (string, error) {
+	switch api.CloudProviderID(bootConfig.CloudProvider) {
 	case api.CloudProviderAWS:
 		region, err := awsup.RegionFromMetadata(ctx)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
+
+		return region, nil
+	}
+
+	return "", nil
+}
+
+// seedRNG adds entropy to the random number generator.
+func seedRNG(ctx context.Context, bootConfig *nodeup.BootConfig, region string) error {
+	switch api.CloudProviderID(bootConfig.CloudProvider) {
+	case api.CloudProviderAWS:
+		config := aws.NewConfig().WithCredentialsChainVerboseErrors(true).WithRegion(region)
+		sess, err := session.NewSession(config)
+		if err != nil {
+			return err
+		}
+
+		random, err := kms.New(sess, config).GenerateRandom(&kms.GenerateRandomInput{
+			NumberOfBytes: aws.Int64(64),
+		})
+		if err != nil {
+			return fmt.Errorf("generating random seed: %v", err)
+		}
+
+		f, err := os.OpenFile("/dev/urandom", os.O_WRONLY, 0)
+		if err != nil {
+			return fmt.Errorf("opening /dev/urandom: %v", err)
+		}
+		_, err = f.Write(random.Plaintext)
+		if err1 := f.Close(); err1 != nil && err == nil {
+			err = err1
+		}
+		if err != nil {
+			return fmt.Errorf("writing /dev/urandom: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// getNodeConfigFromServer queries kops-controller for our node's configuration.
+func getNodeConfigFromServer(ctx context.Context, bootConfig *nodeup.BootConfig, region string) (*nodeup.BootstrapResponse, error) {
+	var authenticator fi.Authenticator
+
+	switch api.CloudProviderID(bootConfig.CloudProvider) {
+	case api.CloudProviderAWS:
 		a, err := awsup.NewAWSAuthenticator(region)
 		if err != nil {
 			return nil, err
 		}
 		authenticator = a
 	default:
-		return nil, fmt.Errorf("unsupported cloud provider %s", config.CloudProvider)
+		return nil, fmt.Errorf("unsupported cloud provider %s", bootConfig.CloudProvider)
 	}
 
 	client := &nodetasks.KopsBootstrapClient{
 		Authenticator: authenticator,
 	}
 
-	if config.CA != "" {
-		client.CA = []byte(config.CA)
-	}
-
-	u, err := url.Parse(config.Server)
+	u, err := url.Parse(bootConfig.ConfigServer.Server)
 	if err != nil {
-		return nil, fmt.Errorf("unable to parse configuration server url %q: %w", config.Server, err)
+		return nil, fmt.Errorf("unable to parse configuration server url %q: %w", bootConfig.ConfigServer.Server, err)
 	}
 	client.BaseURL = *u
+	client.CAs = []byte(bootConfig.ConfigServer.CACertificates)
 
 	request := nodeup.BootstrapRequest{
 		APIVersion:        nodeup.BootstrapAPIVersion,
@@ -671,7 +749,7 @@ func getNodeConfigFromServer(ctx context.Context, config *nodeup.ConfigServerOpt
 func getAWSConfigurationMode(c *model.NodeupModelContext) (string, error) {
 	// Only worker nodes and apiservers can actually autoscale.
 	// We are not adding describe permissions to the other roles
-	role := c.InstanceGroup.Spec.Role
+	role := c.BootConfig.InstanceGroupRole
 	if role != api.InstanceGroupRoleNode && role != api.InstanceGroupRoleAPIServer {
 		return "", nil
 	}
@@ -683,6 +761,10 @@ func getAWSConfigurationMode(c *model.NodeupModelContext) (string, error) {
 	})
 	if err != nil {
 		return "", fmt.Errorf("error describing instances: %v", err)
+	}
+	// If the instance is not a part of an ASG, it won't be in a warm pool either.
+	if len(result.AutoScalingInstances) < 1 {
+		return "", nil
 	}
 	lifecycle := fi.StringValue(result.AutoScalingInstances[0].LifecycleState)
 	if strings.HasPrefix(lifecycle, "Warmed:") {

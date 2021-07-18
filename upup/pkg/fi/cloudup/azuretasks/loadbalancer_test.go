@@ -30,12 +30,14 @@ import (
 
 func newTestLoadBalancer() *LoadBalancer {
 	return &LoadBalancer{
-		Name: to.StringPtr("loadbalancer"),
+		Name:      to.StringPtr("loadbalancer"),
+		Lifecycle: fi.LifecycleSync,
 		ResourceGroup: &ResourceGroup{
 			Name: to.StringPtr("rg"),
 		},
 		Subnet: &Subnet{
-			Name: to.StringPtr("subnet"),
+			Name:      to.StringPtr("subnet"),
+			Lifecycle: fi.LifecycleSync,
 			VirtualNetwork: &VirtualNetwork{
 				Name: to.StringPtr("vnet"),
 			},

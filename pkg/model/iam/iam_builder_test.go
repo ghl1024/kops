@@ -22,9 +22,12 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/testutils"
 	"k8s.io/kops/pkg/testutils/golden"
 	"k8s.io/kops/pkg/util/stringorslice"
+	"k8s.io/kops/upup/pkg/fi"
 )
 
 func TestIAMPrefix(t *testing.T) {
@@ -114,61 +117,36 @@ func TestRoundTrip(t *testing.T) {
 func TestPolicyGeneration(t *testing.T) {
 	grid := []struct {
 		Role                   Subject
-		LegacyIAM              bool
 		AllowContainerRegistry bool
 		Policy                 string
 	}{
 		{
 			Role:                   &NodeRoleMaster{},
-			LegacyIAM:              true,
-			AllowContainerRegistry: false,
-			Policy:                 "tests/iam_builder_master_legacy.json",
-		},
-		{
-			Role:                   &NodeRoleMaster{},
-			LegacyIAM:              false,
 			AllowContainerRegistry: false,
 			Policy:                 "tests/iam_builder_master_strict.json",
 		},
 		{
 			Role:                   &NodeRoleMaster{},
-			LegacyIAM:              false,
 			AllowContainerRegistry: true,
 			Policy:                 "tests/iam_builder_master_strict_ecr.json",
 		},
 		{
 			Role:                   &NodeRoleNode{},
-			LegacyIAM:              true,
-			AllowContainerRegistry: false,
-			Policy:                 "tests/iam_builder_node_legacy.json",
-		},
-		{
-			Role:                   &NodeRoleNode{},
-			LegacyIAM:              false,
 			AllowContainerRegistry: false,
 			Policy:                 "tests/iam_builder_node_strict.json",
 		},
 		{
 			Role:                   &NodeRoleNode{},
-			LegacyIAM:              false,
 			AllowContainerRegistry: true,
 			Policy:                 "tests/iam_builder_node_strict_ecr.json",
 		},
 		{
 			Role:                   &NodeRoleBastion{},
-			LegacyIAM:              true,
 			AllowContainerRegistry: false,
 			Policy:                 "tests/iam_builder_bastion.json",
 		},
 		{
 			Role:                   &NodeRoleBastion{},
-			LegacyIAM:              false,
-			AllowContainerRegistry: false,
-			Policy:                 "tests/iam_builder_bastion.json",
-		},
-		{
-			Role:                   &NodeRoleBastion{},
-			LegacyIAM:              false,
 			AllowContainerRegistry: true,
 			Policy:                 "tests/iam_builder_bastion.json",
 		},
@@ -180,7 +158,6 @@ func TestPolicyGeneration(t *testing.T) {
 				Spec: kops.ClusterSpec{
 					ConfigStore: "s3://kops-tests/iam-builder-test.k8s.local",
 					IAM: &kops.IAMSpec{
-						Legacy:                 x.LegacyIAM,
 						AllowContainerRegistry: x.AllowContainerRegistry,
 					},
 					EtcdClusters: []kops.EtcdClusterSpec{
@@ -205,6 +182,14 @@ func TestPolicyGeneration(t *testing.T) {
 							},
 						},
 					},
+					CloudConfig: &kops.CloudConfiguration{
+						AWSEBSCSIDriver: &kops.AWSEBSCSIDriver{
+							Enabled: fi.Bool(true),
+						},
+					},
+					Networking: &kops.NetworkingSpec{
+						Kubenet: &kops.KubenetNetworkingSpec{},
+					},
 				},
 			},
 			Role: x.Role,
@@ -225,4 +210,35 @@ func TestPolicyGeneration(t *testing.T) {
 
 		golden.AssertMatchesFile(t, actualPolicy, x.Policy)
 	}
+}
+
+func TestEmptyPolicy(t *testing.T) {
+
+	role := &GenericServiceAccount{
+		NamespacedName: types.NamespacedName{
+			Name:      "myaccount",
+			Namespace: "default",
+		},
+		Policy: nil,
+	}
+
+	cluster := testutils.BuildMinimalCluster("irsa.example.com")
+	b := &PolicyBuilder{
+		Cluster: cluster,
+		Role:    role,
+	}
+
+	pr := &PolicyResource{
+		Builder: b,
+	}
+
+	policy, err := fi.ResourceAsString(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if policy != "" {
+		t.Errorf("empty policy should result in empty string, but was %q", policy)
+	}
+
 }

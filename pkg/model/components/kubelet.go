@@ -192,7 +192,7 @@ func (b *KubeletOptionsBuilder) BuildOptions(o interface{}) error {
 		}
 
 		// Specify our pause image
-		image := "k8s.gcr.io/pause:3.2"
+		image := "k8s.gcr.io/pause:3.5"
 		var err error
 		if image, err = b.AssetBuilder.RemapImage(image); err != nil {
 			return err
@@ -217,11 +217,6 @@ func (b *KubeletOptionsBuilder) BuildOptions(o interface{}) error {
 			if _, found := clusterSpec.Kubelet.FeatureGates["InTreePluginAWSUnregister"]; !found {
 				clusterSpec.Kubelet.FeatureGates["InTreePluginAWSUnregister"] = "true"
 			}
-		}
-	}
-	if _, found := clusterSpec.Kubelet.FeatureGates["ExperimentalCriticalPodAnnotation"]; !found {
-		if b.IsKubernetesLT("1.16") {
-			clusterSpec.Kubelet.FeatureGates["ExperimentalCriticalPodAnnotation"] = "true"
 		}
 	}
 

@@ -63,7 +63,8 @@ func TestLoadBalancerIDParse(t *testing.T) {
 
 func newTestVMScaleSet() *VMScaleSet {
 	return &VMScaleSet{
-		Name: to.StringPtr("vmss"),
+		Name:      to.StringPtr("vmss"),
+		Lifecycle: fi.LifecycleSync,
 		ResourceGroup: &ResourceGroup{
 			Name: to.StringPtr("rg"),
 		},
@@ -85,6 +86,7 @@ func newTestVMScaleSet() *VMScaleSet {
 		SSHPublicKey:       to.StringPtr("ssh"),
 		CustomData:         fi.NewStringResource("custom"),
 		Tags:               map[string]*string{},
+		Zones:              []string{"zone1"},
 	}
 }
 
@@ -126,6 +128,10 @@ func TestVMScaleSetRenderAzure(t *testing.T) {
 
 	if expected.PrincipalID == nil {
 		t.Errorf("unexpected nil principalID")
+	}
+
+	if a, e := *actual.Zones, expected.Zones; !reflect.DeepEqual(a, e) {
+		t.Errorf("unexpected Zone: expected %s, but got %s", e, a)
 	}
 }
 
@@ -252,6 +258,7 @@ func TestVMScaleSetFind(t *testing.T) {
 		Identity: &compute.VirtualMachineScaleSetIdentity{
 			Type: compute.ResourceIdentityTypeSystemAssigned,
 		},
+		Zones: &[]string{"zone1"},
 	}
 	if _, err := cloud.VMScaleSet().CreateOrUpdate(context.Background(), *rg.Name, *vmss.Name, vmssParameters); err != nil {
 		t.Fatalf("failed to create: %s", err)
@@ -286,6 +293,9 @@ func TestVMScaleSetFind(t *testing.T) {
 	}
 	if !*actual.RequirePublicIP {
 		t.Errorf("unexpected require public IP")
+	}
+	if a, e := actual.Zones, *vmssParameters.Zones; !reflect.DeepEqual(a, e) {
+		t.Errorf("unexpected Zone: expected %s, but got %s", e, a)
 	}
 }
 

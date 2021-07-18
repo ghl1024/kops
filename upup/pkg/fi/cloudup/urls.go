@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	defaultKopsBaseURL = "https://kubeupv2.s3.amazonaws.com/kops/%s/"
+	defaultKopsBaseURL = "https://artifacts.k8s.io/binaries/kops/%s/"
 )
 
 var kopsBaseURL *url.URL
@@ -81,20 +81,6 @@ func copyBaseURL(base *url.URL) (*url.URL, error) {
 		return nil, err
 	}
 	return u, nil
-}
-
-// SetKopsAssetsLocations sets the kops assets locations
-// This func adds kops binary to the list of file assets, and stages the binary in the assets file repository
-func SetKopsAssetsLocations(assetsBuilder *assets.AssetBuilder) error {
-	for _, s := range []string{
-		"linux/amd64/kops", "darwin/amd64/kops",
-	} {
-		_, _, err := KopsFileURL(s, assetsBuilder)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // NodeUpAsset returns the asset for where nodeup should be downloaded

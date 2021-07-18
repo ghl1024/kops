@@ -23,6 +23,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go/service/eventbridge"
+	"github.com/aws/aws-sdk-go/service/eventbridge/eventbridgeiface"
+	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -114,6 +119,9 @@ type AWSCloud interface {
 	Route53() route53iface.Route53API
 	Spotinst() spotinst.Cloud
 
+	SQS() sqsiface.SQSAPI
+	EventBridge() eventbridgeiface.EventBridgeAPI
+
 	// TODO: Document and rationalize these tags/filters methods
 	AddTags(name *string, tags map[string]string)
 	BuildFilters(name *string) []*ec2.Filter
@@ -140,6 +148,11 @@ type AWSCloud interface {
 	RemoveELBTags(loadBalancerName string, tags map[string]string) error
 	RemoveELBV2Tags(ResourceArn string, tags map[string]string) error
 
+	FindELBByNameTag(findNameTag string) (*elb.LoadBalancerDescription, error)
+	DescribeELBTags(loadBalancerNames []string) (map[string][]*elb.Tag, error)
+	FindELBV2ByNameTag(findNameTag string) (*elbv2.LoadBalancer, error)
+	DescribeELBV2Tags(loadBalancerNames []string) (map[string][]*elbv2.Tag, error)
+
 	// DescribeInstance is a helper that queries for the specified instance by id
 	DescribeInstance(instanceID string) (*ec2.Instance, error)
 
@@ -164,9 +177,6 @@ type AWSCloud interface {
 	// DescribeInstanceType calls ec2.DescribeInstanceType to get information for a particular instance type
 	DescribeInstanceType(instanceType string) (*ec2.InstanceTypeInfo, error)
 
-	// FindClusterStatus gets the status of the cluster as it exists in AWS, inferred from volumes
-	FindClusterStatus(cluster *kops.Cluster) (*kops.ClusterStatus, error)
-
 	// AccountInfo returns the AWS account ID and AWS partition that we are deploying into
 	AccountInfo() (string, string, error)
 }
@@ -181,6 +191,8 @@ type awsCloudImplementation struct {
 	route53     *route53.Route53
 	spotinst    spotinst.Cloud
 	sts         *sts.STS
+	sqs         *sqs.SQS
+	eventbridge *eventbridge.EventBridge
 
 	region string
 
@@ -243,7 +255,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 
 		requestLogger := newRequestLogger(2)
 
-		sess, err := session.NewSession(config)
+		sess, err := session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -251,7 +266,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 		c.cf.Handlers.Send.PushFront(requestLogger)
 		c.addHandlers(region, &c.cf.Handlers)
 
-		sess, err = session.NewSession(config)
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -259,7 +277,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 		c.ec2.Handlers.Send.PushFront(requestLogger)
 		c.addHandlers(region, &c.ec2.Handlers)
 
-		sess, err = session.NewSession(config)
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -267,7 +288,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 		c.iam.Handlers.Send.PushFront(requestLogger)
 		c.addHandlers(region, &c.iam.Handlers)
 
-		sess, err = session.NewSession(config)
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -275,7 +299,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 		c.elb.Handlers.Send.PushFront(requestLogger)
 		c.addHandlers(region, &c.elb.Handlers)
 
-		sess, err = session.NewSession(config)
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -283,7 +310,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 		c.elbv2.Handlers.Send.PushFront(requestLogger)
 		c.addHandlers(region, &c.elbv2.Handlers)
 
-		sess, err = session.NewSession(config)
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -291,7 +321,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 		c.sts.Handlers.Send.PushFront(requestLogger)
 		c.addHandlers(region, &c.sts.Handlers)
 
-		sess, err = session.NewSession(config)
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -299,7 +332,10 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 		c.autoscaling.Handlers.Send.PushFront(requestLogger)
 		c.addHandlers(region, &c.autoscaling.Handlers)
 
-		sess, err = session.NewSession(config)
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
 		if err != nil {
 			return c, err
 		}
@@ -313,6 +349,28 @@ func NewAWSCloud(region string, tags map[string]string) (AWSCloud, error) {
 				return c, err
 			}
 		}
+
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
+		if err != nil {
+			return c, err
+		}
+		c.sqs = sqs.New(sess, config)
+		c.sqs.Handlers.Send.PushFront(requestLogger)
+		c.addHandlers(region, &c.sqs.Handlers)
+
+		sess, err = session.NewSessionWithOptions(session.Options{
+			Config:            *config,
+			SharedConfigState: session.SharedConfigEnable,
+		})
+		if err != nil {
+			return c, err
+		}
+		c.eventbridge = eventbridge.New(sess, config)
+		c.eventbridge.Handlers.Send.PushFront(requestLogger)
+		c.addHandlers(region, &c.eventbridge.Handlers)
 
 		awsCloudInstances[region] = c
 		raw = c
@@ -1361,6 +1419,183 @@ func (c *awsCloudImplementation) AddTags(name *string, tags map[string]string) {
 	}
 }
 
+func (c *awsCloudImplementation) FindELBByNameTag(findNameTag string) (*elb.LoadBalancerDescription, error) {
+	return findELBByNameTag(c, findNameTag)
+}
+
+func findELBByNameTag(c AWSCloud, findNameTag string) (*elb.LoadBalancerDescription, error) {
+	// TODO: Any way around this?
+	klog.V(2).Infof("Listing all ELBs for findLoadBalancerByNameTag")
+
+	request := &elb.DescribeLoadBalancersInput{}
+	// ELB DescribeTags has a limit of 20 names, so we set the page size here to 20 also
+	request.PageSize = aws.Int64(20)
+
+	var found []*elb.LoadBalancerDescription
+
+	var innerError error
+	err := c.ELB().DescribeLoadBalancersPages(request, func(p *elb.DescribeLoadBalancersOutput, lastPage bool) bool {
+		if len(p.LoadBalancerDescriptions) == 0 {
+			return true
+		}
+
+		// TODO: Filter by cluster?
+
+		var names []string
+		nameToELB := make(map[string]*elb.LoadBalancerDescription)
+		for _, elb := range p.LoadBalancerDescriptions {
+			name := aws.StringValue(elb.LoadBalancerName)
+			nameToELB[name] = elb
+			names = append(names, name)
+		}
+
+		tagMap, err := c.DescribeELBTags(names)
+		if err != nil {
+			innerError = err
+			return false
+		}
+
+		for loadBalancerName, tags := range tagMap {
+			name, foundNameTag := FindELBTag(tags, "Name")
+			if !foundNameTag || name != findNameTag {
+				continue
+			}
+
+			elb := nameToELB[loadBalancerName]
+			found = append(found, elb)
+		}
+		return true
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error describing LoadBalancers: %v", err)
+	}
+	if innerError != nil {
+		return nil, fmt.Errorf("error describing LoadBalancers: %v", innerError)
+	}
+
+	if len(found) == 0 {
+		return nil, nil
+	}
+
+	if len(found) != 1 {
+		return nil, fmt.Errorf("Found multiple ELBs with Name %q", findNameTag)
+	}
+
+	return found[0], nil
+}
+
+func (c *awsCloudImplementation) DescribeELBTags(loadBalancerNames []string) (map[string][]*elb.Tag, error) {
+	return describeELBTags(c, loadBalancerNames)
+}
+
+func describeELBTags(c AWSCloud, loadBalancerNames []string) (map[string][]*elb.Tag, error) {
+	// TODO: Filter by cluster?
+
+	request := &elb.DescribeTagsInput{}
+	request.LoadBalancerNames = aws.StringSlice(loadBalancerNames)
+
+	// TODO: Cache?
+	klog.V(2).Infof("Querying ELB tags for %s", loadBalancerNames)
+	response, err := c.ELB().DescribeTags(request)
+	if err != nil {
+		return nil, err
+	}
+
+	tagMap := make(map[string][]*elb.Tag)
+	for _, tagset := range response.TagDescriptions {
+		tagMap[aws.StringValue(tagset.LoadBalancerName)] = tagset.Tags
+	}
+	return tagMap, nil
+}
+
+func (c *awsCloudImplementation) FindELBV2ByNameTag(findNameTag string) (*elbv2.LoadBalancer, error) {
+	return findELBV2ByNameTag(c, findNameTag)
+}
+
+func findELBV2ByNameTag(c AWSCloud, findNameTag string) (*elbv2.LoadBalancer, error) {
+	// TODO: Any way around this?
+	klog.V(2).Infof("Listing all NLBs for findNetworkLoadBalancerByNameTag")
+
+	request := &elbv2.DescribeLoadBalancersInput{}
+	// ELB DescribeTags has a limit of 20 names, so we set the page size here to 20 also
+	request.PageSize = aws.Int64(20)
+
+	var found []*elbv2.LoadBalancer
+
+	var innerError error
+	err := c.ELBV2().DescribeLoadBalancersPages(request, func(p *elbv2.DescribeLoadBalancersOutput, lastPage bool) bool {
+		if len(p.LoadBalancers) == 0 {
+			return true
+		}
+
+		// TODO: Filter by cluster?
+
+		var arns []string
+		arnToELB := make(map[string]*elbv2.LoadBalancer)
+		for _, elb := range p.LoadBalancers {
+			arn := aws.StringValue(elb.LoadBalancerArn)
+			arnToELB[arn] = elb
+			arns = append(arns, arn)
+		}
+
+		tagMap, err := c.DescribeELBV2Tags(arns)
+		if err != nil {
+			innerError = err
+			return false
+		}
+
+		for loadBalancerArn, tags := range tagMap {
+			name, foundNameTag := FindELBV2Tag(tags, "Name")
+			if !foundNameTag || name != findNameTag {
+				continue
+			}
+			elb := arnToELB[loadBalancerArn]
+			found = append(found, elb)
+		}
+		return true
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error describing LoadBalancers: %v", err)
+	}
+	if innerError != nil {
+		return nil, fmt.Errorf("error describing LoadBalancers: %v", innerError)
+	}
+
+	if len(found) == 0 {
+		return nil, nil
+	}
+
+	if len(found) != 1 {
+		return nil, fmt.Errorf("Found multiple NLBs with Name %q", findNameTag)
+	}
+
+	return found[0], nil
+}
+
+func (c *awsCloudImplementation) DescribeELBV2Tags(loadBalancerArns []string) (map[string][]*elbv2.Tag, error) {
+	return describeELBV2Tags(c, loadBalancerArns)
+}
+
+func describeELBV2Tags(c AWSCloud, loadBalancerArns []string) (map[string][]*elbv2.Tag, error) {
+	// TODO: Filter by cluster?
+
+	request := &elbv2.DescribeTagsInput{}
+	request.ResourceArns = aws.StringSlice(loadBalancerArns)
+
+	// TODO: Cache?
+	klog.V(2).Infof("Querying ELBV2 api for tags for %s", loadBalancerArns)
+	response, err := c.ELBV2().DescribeTags(request)
+	if err != nil {
+		return nil, err
+	}
+
+	tagMap := make(map[string][]*elbv2.Tag)
+	for _, tagset := range response.TagDescriptions {
+		tagMap[aws.StringValue(tagset.ResourceArn)] = tagset.Tags
+	}
+	return tagMap, nil
+}
+
 func (c *awsCloudImplementation) BuildFilters(name *string) []*ec2.Filter {
 	return buildFilters(c.tags, name)
 }
@@ -1608,6 +1843,14 @@ func (c *awsCloudImplementation) Spotinst() spotinst.Cloud {
 	return c.spotinst
 }
 
+func (c *awsCloudImplementation) SQS() sqsiface.SQSAPI {
+	return c.sqs
+}
+
+func (c *awsCloudImplementation) EventBridge() eventbridgeiface.EventBridgeAPI {
+	return c.eventbridge
+}
+
 func (c *awsCloudImplementation) FindVPCInfo(vpcID string) (*fi.VPCInfo, error) {
 	return findVPCInfo(c, vpcID)
 }
@@ -1650,6 +1893,42 @@ func findVPCInfo(c AWSCloud, vpcID string) (*fi.VPCInfo, error) {
 	}
 
 	return vpcInfo, nil
+}
+
+func (c *awsCloudImplementation) GetApiIngressStatus(cluster *kops.Cluster) ([]fi.ApiIngressStatus, error) {
+	return getApiIngressStatus(c, cluster)
+}
+
+func getApiIngressStatus(c AWSCloud, cluster *kops.Cluster) ([]fi.ApiIngressStatus, error) {
+	var ingresses []fi.ApiIngressStatus
+	if lbDnsName, err := findDNSName(c, cluster); err != nil {
+		return nil, fmt.Errorf("error finding aws DNSName: %v", err)
+	} else if lbDnsName != "" {
+		ingresses = append(ingresses, fi.ApiIngressStatus{Hostname: lbDnsName})
+	}
+
+	return ingresses, nil
+}
+
+func findDNSName(c AWSCloud, cluster *kops.Cluster) (string, error) {
+	name := "api." + cluster.Name
+	if cluster.Spec.API == nil || cluster.Spec.API.LoadBalancer == nil {
+		return "", nil
+	}
+	if cluster.Spec.API.LoadBalancer.Class == kops.LoadBalancerClassClassic {
+		if lb, err := c.FindELBByNameTag(name); err != nil {
+			return "", fmt.Errorf("error looking for AWS ELB: %v", err)
+		} else if lb != nil {
+			return aws.StringValue(lb.DNSName), nil
+		}
+	} else if cluster.Spec.API.LoadBalancer.Class == kops.LoadBalancerClassNetwork {
+		if lb, err := c.FindELBV2ByNameTag(name); err != nil {
+			return "", fmt.Errorf("error looking for AWS NLB: %v", err)
+		} else if lb != nil {
+			return aws.StringValue(lb.DNSName), nil
+		}
+	}
+	return "", nil
 }
 
 // DefaultInstanceType determines an instance type for the specified cluster & instance group

@@ -24,13 +24,14 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // TargetPool represents a GCE TargetPool
 // +kops:fitask
 type TargetPool struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 }
 
 var _ fi.CompareWithID = &TargetPool{}
@@ -43,7 +44,7 @@ func (e *TargetPool) Find(c *fi.Context) (*TargetPool, error) {
 	cloud := c.Cloud.(gce.GCECloud)
 	name := fi.StringValue(e.Name)
 
-	r, err := cloud.Compute().TargetPools.Get(cloud.Project(), cloud.Region(), name).Do()
+	r, err := cloud.Compute().TargetPools().Get(cloud.Project(), cloud.Region(), name)
 	if err != nil {
 		if gce.IsNotFound(err) {
 			return nil, nil
@@ -84,7 +85,7 @@ func (_ *TargetPool) RenderGCE(t *gce.GCEAPITarget, a, e, changes *TargetPool) e
 	if a == nil {
 		klog.V(4).Infof("Creating TargetPool %q", o.Name)
 
-		op, err := t.Cloud.Compute().TargetPools.Insert(t.Cloud.Project(), t.Cloud.Region(), o).Do()
+		op, err := t.Cloud.Compute().TargetPools().Insert(t.Cloud.Project(), t.Cloud.Region(), o)
 		if err != nil {
 			return fmt.Errorf("error creating TargetPool %q: %v", name, err)
 		}
@@ -117,8 +118,8 @@ func (_ *TargetPool) RenderTerraform(t *terraform.TerraformTarget, a, e, changes
 	return t.RenderResource("google_compute_target_pool", name, tf)
 }
 
-func (e *TargetPool) TerraformLink() *terraform.Literal {
+func (e *TargetPool) TerraformLink() *terraformWriter.Literal {
 	name := fi.StringValue(e.Name)
 
-	return terraform.LiteralSelfLink("google_compute_target_pool", name)
+	return terraformWriter.LiteralSelfLink("google_compute_target_pool", name)
 }

@@ -24,20 +24,21 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/route53"
 	"k8s.io/klog/v2"
-	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type DNSName struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	ID           *string
 	Zone         *DNSZone
+	ResourceName *string
 	ResourceType *string
 
 	TargetLoadBalancer DNSTarget
@@ -49,18 +50,18 @@ type DNSTarget interface {
 	getHostedZoneId() *string
 	CloudformationAttrDNSName() *cloudformation.Literal
 	CloudformationAttrCanonicalHostedZoneNameID() *cloudformation.Literal
-	TerraformLink(...string) *terraform.Literal
+	TerraformLink(...string) *terraformWriter.Literal
 }
 
 func (e *DNSName) Find(c *fi.Context) (*DNSName, error) {
 	cloud := c.Cloud.(awsup.AWSCloud)
 
 	if e.Zone == nil || e.Zone.ZoneID == nil {
-		klog.V(4).Infof("Zone / ZoneID not found for %s, skipping Find", fi.StringValue(e.Name))
+		klog.V(4).Infof("Zone / ZoneID not found for %s, skipping Find", fi.StringValue(e.ResourceName))
 		return nil, nil
 	}
 
-	findName := fi.StringValue(e.Name)
+	findName := fi.StringValue(e.ResourceName)
 	if findName == "" {
 		return nil, nil
 	}
@@ -111,8 +112,9 @@ func (e *DNSName) Find(c *fi.Context) (*DNSName, error) {
 	}
 
 	actual := &DNSName{}
-	actual.Zone = e.Zone
 	actual.Name = e.Name
+	actual.Zone = e.Zone
+	actual.ResourceName = e.ResourceName
 	actual.ResourceType = e.ResourceType
 	actual.Lifecycle = e.Lifecycle
 
@@ -120,56 +122,13 @@ func (e *DNSName) Find(c *fi.Context) (*DNSName, error) {
 		dnsName := aws.StringValue(found.AliasTarget.DNSName)
 		klog.Infof("AliasTarget for %q is %q", aws.StringValue(found.Name), dnsName)
 		if dnsName != "" {
-			if actual.TargetLoadBalancer, err = findDNSTarget(cloud, found.AliasTarget, dnsName, e.Name); err != nil {
+			if actual.TargetLoadBalancer, err = findDNSTarget(cloud, found.AliasTarget, dnsName, e.ResourceName); err != nil {
 				return nil, err
 			}
 		}
 	}
 
 	return actual, nil
-}
-
-func FindDNSName(awsCloud awsup.AWSCloud, cluster *kops.Cluster) (string, error) {
-	name := "api." + cluster.Name
-
-	lb, err := FindElasticLoadBalancerByNameTag(awsCloud, cluster)
-
-	if err != nil {
-		return "", fmt.Errorf("error looking for AWS ELB: %v", err)
-	}
-
-	if lb == nil {
-		return "", nil
-	}
-
-	lbDnsName := aws.StringValue(lb.getDNSName())
-
-	if lbDnsName == "" {
-		return "", fmt.Errorf("found ELB %q, but it did not have a DNSName", name)
-	}
-
-	return lbDnsName, nil
-}
-
-func FindElasticLoadBalancerByNameTag(awsCloud awsup.AWSCloud, cluster *kops.Cluster) (DNSTarget, error) {
-	name := "api." + cluster.Name
-	if cluster.Spec.API == nil || cluster.Spec.API.LoadBalancer == nil {
-		return nil, nil
-	}
-	if cluster.Spec.API.LoadBalancer.Class == kops.LoadBalancerClassClassic {
-		if lb, err := FindLoadBalancerByNameTag(awsCloud, name); err != nil {
-			return nil, fmt.Errorf("error looking for AWS ELB: %v", err)
-		} else if lb != nil {
-			return &ClassicLoadBalancer{Name: fi.String(name), DNSName: lb.DNSName}, nil
-		}
-	} else if cluster.Spec.API.LoadBalancer.Class == kops.LoadBalancerClassNetwork {
-		if lb, err := FindNetworkLoadBalancerByNameTag(awsCloud, name); err != nil {
-			return nil, fmt.Errorf("error looking for AWS NLB: %v", err)
-		} else if lb != nil {
-			return &NetworkLoadBalancer{Name: fi.String(name), DNSName: lb.DNSName}, nil
-		}
-	}
-	return nil, nil
 }
 
 func findDNSTarget(cloud awsup.AWSCloud, aliasTarget *route53.AliasTarget, dnsName string, targetDNSName *string) (DNSTarget, error) {
@@ -197,7 +156,7 @@ func findDNSTargetNLB(cloud awsup.AWSCloud, aliasTarget *route53.AliasTarget, dn
 	if lb != nil {
 		loadBalancerName := aws.StringValue(lb.LoadBalancerName) //TOOD: can we keep these on object
 		loadBalancerArn := aws.StringValue(lb.LoadBalancerArn)   //TODO: can we keep these on object
-		tagMap, err := describeNetworkLoadBalancerTags(cloud, []string{loadBalancerArn})
+		tagMap, err := cloud.DescribeELBV2Tags([]string{loadBalancerArn})
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +178,7 @@ func findDNSTargetELB(cloud awsup.AWSCloud, aliasTarget *route53.AliasTarget, dn
 	}
 	if lb != nil {
 		loadBalancerName := aws.StringValue(lb.LoadBalancerName)
-		tagMap, err := describeLoadBalancerTags(cloud, []string{loadBalancerName})
+		tagMap, err := cloud.DescribeELBTags([]string{loadBalancerName})
 		if err != nil {
 			return nil, err
 		}
@@ -242,13 +201,22 @@ func (s *DNSName) CheckChanges(a, e, changes *DNSName) error {
 		if fi.StringValue(e.Name) == "" {
 			return fi.RequiredField("Name")
 		}
+		if fi.StringValue(e.ResourceName) == "" {
+			return fi.RequiredField("ResourceName")
+		}
+		if fi.StringValue(e.ResourceType) == "" {
+			return fi.RequiredField("ResourceType")
+		}
+		if e.Zone == nil {
+			return fi.RequiredField("Zone")
+		}
 	}
 	return nil
 }
 
 func (_ *DNSName) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *DNSName) error {
 	rrs := &route53.ResourceRecordSet{
-		Name: e.Name,
+		Name: e.ResourceName,
 		Type: e.ResourceType,
 	}
 
@@ -272,7 +240,7 @@ func (_ *DNSName) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *DNSName) error
 	request.HostedZoneId = e.Zone.ZoneID
 	request.ChangeBatch = changeBatch
 
-	klog.V(2).Infof("Updating DNS record %q", *e.Name)
+	klog.V(2).Infof("Updating DNS record %q", *e.ResourceName)
 
 	response, err := t.Cloud.Route53().ChangeResourceRecordSets(request)
 	if err != nil {
@@ -290,19 +258,20 @@ type terraformRoute53Record struct {
 	TTL     *string  `json:"ttl,omitempty" cty:"ttl"`
 	Records []string `json:"records,omitempty" cty:"records"`
 
-	Alias  *terraformAlias    `json:"alias,omitempty" cty:"alias"`
-	ZoneID *terraform.Literal `json:"zone_id" cty:"zone_id"`
+	Alias  *terraformAlias          `json:"alias,omitempty" cty:"alias"`
+	ZoneID *terraformWriter.Literal `json:"zone_id" cty:"zone_id"`
 }
 
 type terraformAlias struct {
-	Name                 *terraform.Literal `json:"name" cty:"name"`
-	ZoneID               *terraform.Literal `json:"zone_id" cty:"zone_id"`
-	EvaluateTargetHealth *bool              `json:"evaluate_target_health" cty:"evaluate_target_health"`
+	Name                 *terraformWriter.Literal `json:"name" cty:"name"`
+	Type                 *terraformWriter.Literal `json:"type" cty:"type"`
+	ZoneID               *terraformWriter.Literal `json:"zone_id" cty:"zone_id"`
+	EvaluateTargetHealth *bool                    `json:"evaluate_target_health" cty:"evaluate_target_health"`
 }
 
 func (_ *DNSName) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *DNSName) error {
 	tf := &terraformRoute53Record{
-		Name:   e.Name,
+		Name:   e.ResourceName,
 		ZoneID: e.Zone.TerraformLink(),
 		Type:   e.ResourceType,
 	}
@@ -318,8 +287,8 @@ func (_ *DNSName) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *D
 	return t.RenderResource("aws_route53_record", *e.Name, tf)
 }
 
-func (e *DNSName) TerraformLink() *terraform.Literal {
-	return terraform.LiteralSelfLink("aws_route53_record", *e.Name)
+func (e *DNSName) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralSelfLink("aws_route53_record", *e.Name)
 }
 
 type cloudformationRoute53Record struct {
@@ -340,7 +309,7 @@ type cloudformationAlias struct {
 
 func (_ *DNSName) RenderCloudformation(t *cloudformation.CloudformationTarget, a, e, changes *DNSName) error {
 	cf := &cloudformationRoute53Record{
-		Name:   e.Name,
+		Name:   e.ResourceName,
 		ZoneID: e.Zone.CloudformationLink(),
 		Type:   e.ResourceType,
 	}

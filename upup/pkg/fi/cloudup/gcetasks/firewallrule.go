@@ -24,13 +24,14 @@ import (
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // FirewallRule represents a GCE firewall rules
 // +kops:fitask
 type FirewallRule struct {
 	Name      *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	Network      *Network
 	SourceTags   []string
@@ -48,7 +49,7 @@ func (e *FirewallRule) CompareWithID() *string {
 func (e *FirewallRule) Find(c *fi.Context) (*FirewallRule, error) {
 	cloud := c.Cloud.(gce.GCECloud)
 
-	r, err := cloud.Compute().Firewalls.Get(cloud.Project(), *e.Name).Do()
+	r, err := cloud.Compute().Firewalls().Get(cloud.Project(), *e.Name)
 	if err != nil {
 		if gce.IsNotFound(err) {
 			return nil, nil
@@ -143,12 +144,12 @@ func (_ *FirewallRule) RenderGCE(t *gce.GCEAPITarget, a, e, changes *FirewallRul
 	}
 
 	if a == nil {
-		_, err := t.Cloud.Compute().Firewalls.Insert(t.Cloud.Project(), firewall).Do()
+		_, err := t.Cloud.Compute().Firewalls().Insert(t.Cloud.Project(), firewall)
 		if err != nil {
 			return fmt.Errorf("error creating FirewallRule: %v", err)
 		}
 	} else {
-		_, err := t.Cloud.Compute().Firewalls.Update(t.Cloud.Project(), *e.Name, firewall).Do()
+		_, err := t.Cloud.Compute().Firewalls().Update(t.Cloud.Project(), *e.Name, firewall)
 		if err != nil {
 			return fmt.Errorf("error creating FirewallRule: %v", err)
 		}
@@ -163,8 +164,8 @@ type terraformAllow struct {
 }
 
 type terraformFirewall struct {
-	Name    string             `json:"name" cty:"name"`
-	Network *terraform.Literal `json:"network" cty:"network"`
+	Name    string                   `json:"name" cty:"name"`
+	Network *terraformWriter.Literal `json:"network" cty:"network"`
 
 	Allowed []*terraformAllow `json:"allow,omitempty" cty:"allow"`
 

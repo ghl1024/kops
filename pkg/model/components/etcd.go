@@ -24,7 +24,7 @@ import (
 	"k8s.io/kops/upup/pkg/fi/loader"
 )
 
-const DefaultBackupImage = "kopeio/etcd-backup:3.0.20210122"
+const DefaultBackupImage = "k8s.gcr.io/etcdadm/etcd-backup:3.0.20210707"
 
 // EtcdOptionsBuilder adds options for etcd to the model
 type EtcdOptionsBuilder struct {
@@ -34,11 +34,9 @@ type EtcdOptionsBuilder struct {
 var _ loader.OptionsBuilder = &EtcdOptionsBuilder{}
 
 const (
-	DefaultEtcd3Version_1_14 = "3.3.10"
-
 	DefaultEtcd3Version_1_17 = "3.4.3"
-
 	DefaultEtcd3Version_1_19 = "3.4.13"
+	DefaultEtcd3Version_1_22 = "3.5.0"
 )
 
 // BuildOptions is responsible for filling in the defaults for the etcd cluster model
@@ -54,12 +52,12 @@ func (b *EtcdOptionsBuilder) BuildOptions(o interface{}) error {
 		// Ensure the version is set
 		if c.Version == "" {
 			// We run the k8s-recommended versions of etcd
-			if b.IsKubernetesGTE("1.19") {
+			if b.IsKubernetesGTE("1.22") {
+				c.Version = DefaultEtcd3Version_1_22
+			} else if b.IsKubernetesGTE("1.19") {
 				c.Version = DefaultEtcd3Version_1_19
-			} else if b.IsKubernetesGTE("1.17") {
-				c.Version = DefaultEtcd3Version_1_17
 			} else {
-				c.Version = DefaultEtcd3Version_1_14
+				c.Version = DefaultEtcd3Version_1_17
 			}
 		}
 

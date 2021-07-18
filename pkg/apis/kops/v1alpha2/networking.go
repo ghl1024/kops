@@ -38,7 +38,7 @@ type NetworkingSpec struct {
 }
 
 // ClassicNetworkingSpec is the specification of classic networking mode, integrated into kubernetes.
-// Support been removed since kubernetes 1.4.
+// Support been removed since Kubernetes 1.4.
 type ClassicNetworkingSpec struct {
 }
 
@@ -95,7 +95,7 @@ type WeaveNetworkingSpec struct {
 type FlannelNetworkingSpec struct {
 	// Backend is the backend overlay type we want to use (vxlan or udp)
 	Backend string `json:"backend,omitempty"`
-	// DisableTxChecksumOffloading is deprecated as of kops 1.19 and has no effect
+	// DisableTxChecksumOffloading is deprecated as of kOps 1.19 and has no effect.
 	DisableTxChecksumOffloading bool `json:"disableTxChecksumOffloading,omitempty"`
 	// IptablesResyncSeconds sets resync period for iptables rules, in seconds
 	IptablesResyncSeconds *int32 `json:"iptablesResyncSeconds,omitempty"`
@@ -109,7 +109,7 @@ type CalicoNetworkingSpec struct {
 	Version string `json:"version,omitempty"`
 
 	// AWSSrcDstCheck enables/disables ENI source/destination checks (AWS only)
-	// Options: DoNothing (default), Enable, or Disable
+	// Options: Disable (default), Enable, or DoNothing
 	AWSSrcDstCheck string `json:"awsSrcDstCheck,omitempty"`
 	// BPFEnabled enables the eBPF dataplane mode.
 	BPFEnabled bool `json:"bpfEnabled,omitempty"`
@@ -132,17 +132,19 @@ type CalicoNetworkingSpec struct {
 	ChainInsertMode string `json:"chainInsertMode,omitempty"`
 	// CPURequest CPU request of Calico container. Default: 100m
 	CPURequest *resource.Quantity `json:"cpuRequest,omitempty"`
-	// CrossSubnet enables Calico's cross-subnet mode when set to true
-	CrossSubnet bool `json:"crossSubnet,omitempty"`
+	// CrossSubnet is deprecated as of kOps 1.22 and has no effect
+	CrossSubnet *bool `json:"crossSubnet,omitempty"`
 	// EncapsulationMode specifies the network packet encapsulation protocol for Calico to use,
 	// employing such encapsulation at the necessary scope per the related CrossSubnet field. In
 	// "ipip" mode, Calico will use IP-in-IP encapsulation as needed. In "vxlan" mode, Calico will
 	// encapsulate packets as needed using the VXLAN scheme.
 	// Options: ipip (default) or vxlan
 	EncapsulationMode string `json:"encapsulationMode,omitempty"`
-	// IPIPMode is the encapsulation mode to use for the default Calico IPv4 pool created at start
-	// up, determining when to use IP-in-IP encapsulation, conveyed to the "calico-node" daemon
-	// container via the CALICO_IPV4POOL_IPIP environment variable.
+	// IPIPMode determines when to use IP-in-IP encapsulation for the default Calico IPv4 pool.
+	// It is conveyed to the "calico-node" daemon container via the CALICO_IPV4POOL_IPIP
+	// environment variable. EncapsulationMode must be set to "ipip".
+	// Options: "CrossSubnet", "Always", or "Never".
+	// Default: "CrossSubnet" if EncapsulationMode is "ipip", "Never" otherwise.
 	IPIPMode string `json:"ipipMode,omitempty"`
 	// IPv4AutoDetectionMethod configures how Calico chooses the IP address used to route
 	// between nodes.  This should be set when the host has multiple interfaces
@@ -183,6 +185,12 @@ type CalicoNetworkingSpec struct {
 	TyphaPrometheusMetricsPort int32 `json:"typhaPrometheusMetricsPort,omitempty"`
 	// TyphaReplicas is the number of replicas of Typha to deploy
 	TyphaReplicas int32 `json:"typhaReplicas,omitempty"`
+	// VXLANMode determines when to use VXLAN encapsulation for the default Calico IPv4 pool.
+	// It is conveyed to the "calico-node" daemon container via the CALICO_IPV4POOL_VXLAN
+	// environment variable. EncapsulationMode must be set to "vxlan".
+	// Options: "CrossSubnet", "Always", or "Never".
+	// Default: "CrossSubnet" if EncapsulationMode is "vxlan", "Never" otherwise.
+	VXLANMode string `json:"vxlanMode,omitempty"`
 	// WireguardEnabled enables WireGuard encryption for all on-the-wire pod-to-pod traffic
 	// (default: false)
 	WireguardEnabled bool `json:"wireguardEnabled,omitempty"`
@@ -203,7 +211,7 @@ type CanalNetworkingSpec struct {
 	// DisableFlannelForwardRules configures Flannel to NOT add the
 	// default ACCEPT traffic rules to the iptables FORWARD chain
 	DisableFlannelForwardRules bool `json:"disableFlannelForwardRules,omitempty"`
-	// DisableTxChecksumOffloading is deprecated as of kops 1.19 and has no effect
+	// DisableTxChecksumOffloading is deprecated as of kOps 1.19 and has no effect.
 	DisableTxChecksumOffloading bool `json:"disableTxChecksumOffloading,omitempty"`
 	// IptablesBackend controls which variant of iptables binary Felix uses
 	// Default: Auto (other options: Legacy, NFT)
@@ -238,7 +246,7 @@ type KuberouterNetworkingSpec struct {
 }
 
 // RomanaNetworkingSpec declares that we want Romana networking
-// Romana is deprecated as of kops 1.18 and removed as of kops 1.19
+// Romana is deprecated as of kOps 1.18 and removed as of kOps 1.19.
 type RomanaNetworkingSpec struct {
 	// DaemonServiceIP is the Kubernetes Service IP for the romana-daemon pod
 	DaemonServiceIP string `json:"daemonServiceIP,omitempty"`
@@ -248,11 +256,15 @@ type RomanaNetworkingSpec struct {
 
 // AmazonVPCNetworkingSpec declares that we want Amazon VPC CNI networking
 type AmazonVPCNetworkingSpec struct {
-	// The container image name to use
+	// ImageName is the container image name to use.
 	ImageName string `json:"imageName,omitempty"`
+	// InitImageName is the init container image name to use.
+	InitImageName string `json:"initImageName,omitempty"`
 	// Env is a list of environment variables to set in the container.
 	Env []EnvVar `json:"env,omitempty"`
 }
+
+const CiliumIpamEni = "eni"
 
 // CiliumNetworkingSpec declares that we want Cilium networking
 type CiliumNetworkingSpec struct {
@@ -299,6 +311,9 @@ type CiliumNetworkingSpec struct {
 	// DisableConntrack is not implemented and may be removed in the future.
 	// Setting this has no effect.
 	DisableConntrack bool `json:"disableConntrack,omitempty"`
+	// DisableEndpointCRD disables usage of CiliumEndpoint CRD.
+	// Default: false
+	DisableEndpointCRD bool `json:"disableEndpointCRD,omitempty"`
 	// DisableIpv4 is deprecated: Use EnableIpv4 instead.
 	// Setting this flag has no effect.
 	DisableIpv4 bool `json:"disableIpv4,omitempty"`
@@ -311,6 +326,15 @@ type CiliumNetworkingSpec struct {
 	// "never": Cilium allows all traffic regardless of policies in place.
 	// If unspecified, "default" policy mode will be used.
 	EnablePolicy string `json:"enablePolicy,omitempty"`
+	// EnableL7Proxy enables L7 proxy for L7 policy enforcement.
+	// Default: true
+	EnableL7Proxy *bool `json:"enableL7Proxy,omitempty"`
+	// EnableBPFMasquerade enables masquerading packets from endpoints leaving the host with BPF instead of iptables.
+	// Default: false
+	EnableBPFMasquerade *bool `json:"enableBPFMasquerade,omitempty"`
+	// EnableEndpointHealthChecking enables connectivity health checking between virtual endpoints.
+	// Default: true
+	EnableEndpointHealthChecking *bool `json:"enableEndpointHealthChecking,omitempty"`
 	// EnableTracing is not implemented and may be removed in the future.
 	// Setting this has no effect.
 	EnableTracing bool `json:"enableTracing,omitempty"`
@@ -322,6 +346,12 @@ type CiliumNetworkingSpec struct {
 	// EnvoyLog is not implemented and may be removed in the future.
 	// Setting this has no effect.
 	EnvoyLog string `json:"envoyLog,omitempty"`
+	// IdentityAllocationMode specifies in which backend identities are stored ("crd", "kvstore").
+	// Default: crd
+	IdentityAllocationMode string `json:"identityAllocationMode,omitempty"`
+	// IdentityChangeGracePeriod specifies the duration to wait before using a changed identity.
+	// Default: 5s
+	IdentityChangeGracePeriod string `json:"identityChangeGracePeriod,omitempty"`
 	// Ipv4ClusterCIDRMaskSize is not implemented and may be removed in the future.
 	// Setting this has no effect.
 	Ipv4ClusterCIDRMaskSize int `json:"ipv4ClusterCidrMaskSize,omitempty"`
@@ -386,7 +416,7 @@ type CiliumNetworkingSpec struct {
 	// Setting this has no effect.
 	LogstashProbeTimer uint32 `json:"logstashProbeTimer,omitempty"`
 	// DisableMasquerade disables masquerading traffic to external destinations behind the node IP.
-	DisableMasquerade bool `json:"disableMasquerade,omitempty"`
+	DisableMasquerade *bool `json:"disableMasquerade,omitempty"`
 	// Nat6Range is not implemented and may be removed in the future.
 	// Setting this has no effect.
 	Nat46Range string `json:"nat46Range,omitempty"`
@@ -432,6 +462,24 @@ type CiliumNetworkingSpec struct {
 	// BPFCTGlobalAnyMax is the maximum number of entries in the non-TCP CT table.
 	// Default: 262144
 	BPFCTGlobalAnyMax int `json:"bpfCTGlobalAnyMax,omitempty"`
+	// BPFLBAlgorithm is the load balancing algorithm ("random", "maglev").
+	// Default: random
+	BPFLBAlgorithm string `json:"bpfLBAlgorithm,omitempty"`
+	// BPFLBMaglevTableSize is the per service backend table size when going with Maglev (parameter M).
+	// Default: 16381
+	BPFLBMaglevTableSize string `json:"bpfLBMaglevTableSize,omitempty"`
+	// BPFNATGlobalMax is the the maximum number of entries in the BPF NAT table.
+	// Default: 524288
+	BPFNATGlobalMax int `json:"bpfNATGlobalMax,omitempty"`
+	// BPFNeighGlobalMax is the the maximum number of entries in the BPF Neighbor table.
+	// Default: 524288
+	BPFNeighGlobalMax int `json:"bpfNeighGlobalMax,omitempty"`
+	// BPFPolicyMapMax is the maximum number of entries in endpoint policy map.
+	// Default: 16384
+	BPFPolicyMapMax int `json:"bpfPolicyMapMax,omitempty"`
+	// BPFLBMapMax is the maximum number of entries in bpf lb service, backend and affinity maps.
+	// Default: 65536
+	BPFLBMapMax int `json:"bpfLBMapMax,omitempty"`
 	// PreallocateBPFMaps reduces the per-packet latency at the expense of up-front memory allocation.
 	// Default: true
 	PreallocateBPFMaps bool `json:"preallocateBPFMaps,omitempty"`
@@ -461,7 +509,7 @@ type CiliumNetworkingSpec struct {
 	// "crd" will use CRDs for controlling IP address management.
 	// "hostscope" will use hostscope IPAM mode.
 	// "kubernetes" will use addersing based on node pod CIDR.
-	// Empty value will use host-scope address management.
+	// Empty value will use hostscope for cilum <= 1.7 and "kubernetes" otherwise.
 	Ipam string `json:"ipam,omitempty"`
 	// IPTablesRulesNoinstall disables installing the base IPTables rules used for masquerading and kube-proxy.
 	// Default: false
@@ -469,6 +517,11 @@ type CiliumNetworkingSpec struct {
 	// AutoDirectNodeRoutes adds automatic L2 routing between nodes.
 	// Default: false
 	AutoDirectNodeRoutes bool `json:"autoDirectNodeRoutes,omitempty"`
+	// EnableHostReachableServices configures Cilium to enable services to be
+	// reached from the host namespace in addition to pod namespaces.
+	// https://docs.cilium.io/en/v1.9/gettingstarted/host-services/
+	// Default: false
+	EnableHostReachableServices bool `json:"enableHostReachableServices,omitempty"`
 	// EnableNodePort replaces kube-proxy with Cilium's BPF implementation.
 	// Requires spec.kubeProxy.enabled be set to false.
 	// Default: false
@@ -502,7 +555,7 @@ type CiliumNetworkingSpec struct {
 
 // HubbleSpec configures the Hubble service on the Cilium agent.
 type HubbleSpec struct {
-	// Enabled specifies whether Hubble is enabled on the agent.
+	// Enabled decides if Hubble is enabled on the agent or not
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// Metrics is a list of metrics to collect. If empty or null, metrics are disabled.
@@ -510,7 +563,7 @@ type HubbleSpec struct {
 	Metrics []string `json:"metrics,omitempty"`
 }
 
-// LyftVPCNetworkingSpec declares that we want to use the cni-ipvlan-vpc-k8s CNI networking
+// LyftVPCNetworkingSpec declares that we want to use the cni-ipvlan-vpc-k8s CNI networking.
 type LyftVPCNetworkingSpec struct {
 	SubnetTags map[string]string `json:"subnetTags,omitempty"`
 }

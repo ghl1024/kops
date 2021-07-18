@@ -34,7 +34,7 @@ import (
 type StorageAclBuilder struct {
 	*GCEModelContext
 	Cloud     gce.GCECloud
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &NetworkModelBuilder{}
@@ -68,7 +68,7 @@ func (b *StorageAclBuilder) Build(c *fi.ModelBuilderContext) error {
 		}
 
 		klog.Warningf("we need to split master / node roles")
-		nodeRole, err := iam.BuildNodeRoleSubject(kops.InstanceGroupRoleMaster)
+		nodeRole, err := iam.BuildNodeRoleSubject(kops.InstanceGroupRoleMaster, false)
 		if err != nil {
 			return err
 		}

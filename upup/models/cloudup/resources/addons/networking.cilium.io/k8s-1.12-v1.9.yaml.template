@@ -61,7 +61,9 @@ data:
   #   backend. Upgrades from these older cilium versions should continue using
   #   the kvstore by commenting out the identity-allocation-mode below, or
   #   setting it to "kvstore".
-  identity-allocation-mode: crd
+  # (default crd)
+  identity-allocation-mode: "{{ .IdentityAllocationMode }}"
+
   # If you want to run cilium in debug mode change this value to true
   debug: "{{ .Debug }}"
   {{ if .EnablePrometheusMetrics }}
@@ -102,6 +104,32 @@ data:
   # during the upgrade process, comment out these options.
   bpf-ct-global-tcp-max: "{{ .BPFCTGlobalTCPMax }}"
   bpf-ct-global-any-max: "{{ .BPFCTGlobalAnyMax }}"
+
+  # BPF load balancing algorithm ("random", "maglev") (default "random")
+  bpf-lb-algorithm: "{{ .BPFLBAlgorithm }}"
+
+  # Maglev per service backend table size (parameter M) (default 16381)
+  bpf-lb-maglev-table-size: "{{ .BPFLBMaglevTableSize }}"
+
+  # bpf-nat-global-max specified the maximum number of entries in the
+  # BPF NAT table. (default 524288)
+  bpf-nat-global-max: "{{ .BPFNATGlobalMax }}"
+
+  # bpf-neigh-global-max specified the maximum number of entries in the
+  # BPF neighbor table. (default 524288)
+  bpf-neigh-global-max: "{{ .BPFNeighGlobalMax }}"
+
+  # bpf-policy-map-max specifies the maximum number of entries in endpoint
+  # policy map (per endpoint) (default 16384)
+  bpf-policy-map-max: "{{ .BPFPolicyMapMax }}"
+
+  # bpf-lb-map-max specifies the maximum number of entries in bpf lb service,
+  # backend and affinity maps. (default 65536)
+  bpf-lb-map-max: "{{ .BPFLBMapMax }}"
+
+  # enable-bpf-masquerade enables masquerading packets from endpoints leaving
+  # the host with BPF instead of iptables. (default false)
+  enable-bpf-masquerade: "{{ .EnableBPFMasquerade }}"
 
   # Pre-allocation of map entries allows per-packet latency to be reduced, at
   # the expense of up-front memory allocation for the entries in the maps. The
@@ -170,12 +198,15 @@ data:
   # - auto (automatically detect the container runtime)
   #
   container-runtime: "{{ .ContainerRuntimeLabels }}"
-  masquerade: "{{- if .DisableMasquerade -}}false{{- else -}}true{{- end -}}"
+  masquerade: "{{- if WithDefaultBool .DisableMasquerade false -}}false{{- else -}}true{{- end -}}"
   install-iptables-rules: "{{- if .IPTablesRulesNoinstall -}}false{{- else -}}true{{- end -}}"
   auto-direct-node-routes: "{{ .AutoDirectNodeRoutes }}"
+  {{ if .EnableHostReachableServices }}
+  enable-host-reachable-services: "{{ .EnableHostReachableServices }}"
+  {{ end }}
   enable-node-port: "{{ .EnableNodePort }}"
   kube-proxy-replacement: "{{- if .EnableNodePort -}}strict{{- else -}}partial{{- end -}}"
-  enable-remote-node-identity: "{{ .EnableRemoteNodeIdentity -}}"
+
   {{ with .Ipam }}
   ipam: {{ . }}
   {{ if eq . "eni" }}
@@ -185,11 +216,29 @@ data:
   {{ end }}
   {{ end }}
 
+  # Disables usage of CiliumEndpoint CRD
+  disable-endpoint-crd: "{{ .DisableEndpointCRD }}"
+
+  # Enable connectivity health checking between virtual endpoints (default true)
+  enable-endpoint-health-checking: "{{ .EnableEndpointHealthChecking }}"
+
+  # Enable use of remote node identity (default false)
+  enable-remote-node-identity: "{{ .EnableRemoteNodeIdentity }}"
+
+  # enable-l7-proxy enables L7 proxy for L7 policy enforcement. (default true)
+  enable-l7-proxy: "{{ .EnableL7Proxy }}"
+
   {{ if WithDefaultBool .Hubble.Enabled false }}
   # Enable Hubble gRPC service.
   enable-hubble: "true"
   # UNIX domain socket for Hubble server to listen to.
   hubble-socket-path:  "/var/run/cilium/hubble.sock"
+  # An additional address for Hubble server to listen to (e.g. ":4244").
+  hubble-listen-address: ":4244"
+  hubble-disable-tls: "false"
+  hubble-tls-cert-file: /var/lib/cilium/tls/hubble/tls.crt
+  hubble-tls-key-file: /var/lib/cilium/tls/hubble/tls.key
+  hubble-tls-client-ca-files: /var/lib/cilium/tls/hubble/ca.crt
   {{ if .Hubble.Metrics }}
   hubble-metrics-server: ":9091"
   hubble-metrics:
@@ -211,8 +260,13 @@ data:
   config.yaml: |
     peer-service: unix:///var/run/cilium/hubble.sock
     listen-address: :4245
-    disable-client-tls: true
+
     disable-server-tls: true
+
+    tls-client-cert-file: /var/lib/hubble-relay/tls/client.crt
+    tls-client-key-file: /var/lib/hubble-relay/tls/client.key
+    tls-hubble-server-ca-files: /var/lib/hubble-relay/tls/hubble-server-ca.crt
+
 {{ end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -489,6 +543,12 @@ spec:
         # gets priority scheduling.
         # https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
         scheduler.alpha.kubernetes.io/critical-pod: ""
+        {{ if .EnablePrometheusMetrics }}
+        # Annotation required for prometheus auto-discovery scraping
+        # https://docs.cilium.io/en/v1.9/operations/metrics/#installation
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ printf "%q" .AgentPrometheusPort }}
+        {{ end }}
       labels:
         k8s-app: cilium
         kubernetes.io/cluster-service: "true"
@@ -588,7 +648,7 @@ spec:
         - name: CILIUM_ENABLE_POLICY
           value: {{ . }}
         {{ end }}
-        image: "docker.io/cilium/cilium:{{ .Version  }}"
+        image: "quay.io/cilium/cilium:{{ .Version  }}"
         imagePullPolicy: IfNotPresent
         lifecycle:
           postStart:
@@ -650,6 +710,11 @@ spec:
           readOnly: true
         - mountPath: /run/xtables.lock
           name: xtables-lock
+{{ if WithDefaultBool .Hubble.Enabled false }}
+        - mountPath: /var/lib/cilium/tls/hubble
+          name: hubble-tls
+          readOnly: true
+{{ end }}
 {{ if CiliumSecret }}
         - mountPath: /etc/ipsec
           name: cilium-ipsec-secrets
@@ -677,7 +742,7 @@ spec:
               key: wait-bpf-mount
               name: cilium-config
               optional: true
-        image: "docker.io/cilium/cilium:{{ .Version }}"
+        image: "quay.io/cilium/cilium:{{ .Version }}"
         imagePullPolicy: IfNotPresent
         name: clean-cilium-state
         securityContext:
@@ -764,6 +829,12 @@ spec:
         secret:
           secretName: cilium-ipsec-keys
 {{ end }}
+{{ if WithDefaultBool .Hubble.Enabled false }}
+      - name: hubble-tls
+        secret:
+          secretName: hubble-server-certs
+          optional: true
+{{ end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -792,10 +863,11 @@ spec:
     spec:
       containers:
       - args:
-        - --config-dir=/tmp/cilium/config-map
-        - --debug=$(CILIUM_DEBUG)
+        - "--config-dir=/tmp/cilium/config-map"
+        - "--debug=$(CILIUM_DEBUG)"
+        - "--eni-tags={{ CloudLabels }}"
         command:
-        - cilium-operator-generic
+        - cilium-operator
         env:
         - name: K8S_NODE_NAME
           valueFrom:
@@ -817,7 +889,7 @@ spec:
           value: "{{ $.MasterInternalName }}"
         - name: KUBERNETES_SERVICE_PORT
           value: "443"
-        image: "docker.io/cilium/operator-generic:{{ .Version }}"
+        image: "quay.io/cilium/operator:{{ .Version }}"
         imagePullPolicy: IfNotPresent
         name: cilium-operator
         {{ if .EnablePrometheusMetrics }}
@@ -899,7 +971,7 @@ spec:
   strategy:
     rollingUpdate:
       maxUnavailable: 1
-      type: RollingUpdate
+    type: RollingUpdate
   template:
     metadata:
       labels:
@@ -917,7 +989,7 @@ spec:
             topologyKey: "kubernetes.io/hostname"
       containers:
         - name: hubble-relay
-          image: "docker.io/cilium/hubble-relay:{{ .Version }}"
+          image: "quay.io/cilium/hubble-relay:{{ .Version }}"
           imagePullPolicy: IfNotPresent
           command:
             - hubble-relay
@@ -925,6 +997,10 @@ spec:
             - "serve"
             - "--peer-service=unix:///var/run/cilium/hubble.sock"
             - "--listen-address=:4245"
+          env:
+            # unfortunately, the addon CAs use only CN
+            - name: GODEBUG
+              value: x509ignoreCN=0
           ports:
             - name: grpc
               containerPort: 4245
@@ -940,6 +1016,9 @@ spec:
             readOnly: true
           - mountPath: /etc/hubble-relay
             name: config
+            readOnly: true
+          - mountPath: /var/lib/hubble-relay/tls
+            name: tls
             readOnly: true
       restartPolicy: Always
       serviceAccount: hubble-relay
@@ -958,5 +1037,49 @@ spec:
           - key: config.yaml
             path: config.yaml
         name: config
+      - projected:
+          sources:
+          - secret:
+              name: hubble-relay-client-certs
+              items:
+                - key: tls.crt
+                  path: client.crt
+                - key: tls.key
+                  path: client.key
+                - key: ca.crt
+                  path: hubble-server-ca.crt
+        name: tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    k8s-app: cilium
+  name: hubble-server-certs
+  namespace: kube-system
+spec:
+  dnsNames:
+  - "*.default.hubble-grpc.cilium.io"
+  issuerRef:
+    kind: Issuer
+    name: networking.cilium.io
+  secretName: hubble-server-certs
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    k8s-app: cilium
+  name: hubble-relay-client-certs
+  namespace: kube-system
+spec:
+  dnsNames:
+  - "hubble-relay-client"
+  issuerRef:
+    kind: Issuer
+    name: networking.cilium.io
+  usages:
+  - client auth
+  secretName: hubble-relay-client-certs
 {{ end }}
 {{ end }}

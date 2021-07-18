@@ -241,11 +241,15 @@
             "HttpPutResponseHopLimit": 1,
             "HttpTokens": "optional"
           },
+          "Monitoring": {
+            "Enabled": false
+          },
           "NetworkInterfaces": [
             {
               "AssociatePublicIpAddress": true,
               "DeleteOnTermination": true,
               "DeviceIndex": 0,
+              "Ipv6AddressCount": 0,
               "Groups": [
                 {
                   "Ref": "AWSEC2SecurityGroupmastersminimalexamplecom"
@@ -377,11 +381,15 @@
             "HttpPutResponseHopLimit": 1,
             "HttpTokens": "optional"
           },
+          "Monitoring": {
+            "Enabled": false
+          },
           "NetworkInterfaces": [
             {
               "AssociatePublicIpAddress": true,
               "DeleteOnTermination": true,
               "DeviceIndex": 0,
+              "Ipv6AddressCount": 0,
               "Groups": [
                 {
                   "Ref": "AWSEC2SecurityGroupnodesminimalexamplecom"
@@ -461,6 +469,18 @@
         }
       }
     },
+    "AWSEC2Route0": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "AWSEC2RouteTableminimalexamplecom"
+        },
+        "DestinationIpv6CidrBlock": "::/0",
+        "GatewayId": {
+          "Ref": "AWSEC2InternetGatewayminimalexamplecom"
+        }
+      }
+    },
     "AWSEC2Route00000": {
       "Type": "AWS::EC2::Route",
       "Properties": {
@@ -499,6 +519,18 @@
         ]
       }
     },
+    "AWSEC2SecurityGroupEgressfrommastersminimalexamplecomegressall0to00": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "AWSEC2SecurityGroupmastersminimalexamplecom"
+        },
+        "FromPort": 0,
+        "ToPort": 0,
+        "IpProtocol": "-1",
+        "CidrIpv6": "::/0"
+      }
+    },
     "AWSEC2SecurityGroupEgressfrommastersminimalexamplecomegressall0to000000": {
       "Type": "AWS::EC2::SecurityGroupEgress",
       "Properties": {
@@ -509,6 +541,18 @@
         "ToPort": 0,
         "IpProtocol": "-1",
         "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "AWSEC2SecurityGroupEgressfromnodesminimalexamplecomegressall0to00": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "AWSEC2SecurityGroupnodesminimalexamplecom"
+        },
+        "FromPort": 0,
+        "ToPort": 0,
+        "IpProtocol": "-1",
+        "CidrIpv6": "::/0"
       }
     },
     "AWSEC2SecurityGroupEgressfromnodesminimalexamplecomegressall0to000000": {
@@ -744,8 +788,21 @@
           {
             "Key": "kubernetes.io/role/elb",
             "Value": "1"
+          },
+          {
+            "Key": "kubernetes.io/role/internal-elb",
+            "Value": "1"
           }
         ]
+      }
+    },
+    "AWSEC2VPCCidrBlockAmazonIPv6": {
+      "Type": "AWS::EC2::VPCCidrBlock",
+      "Properties": {
+        "VpcId": {
+          "Ref": "AWSEC2VPCminimalexamplecom"
+        },
+        "AmazonProvidedIpv6CidrBlock": true
       }
     },
     "AWSEC2VPCDHCPOptionsAssociationminimalexamplecom": {

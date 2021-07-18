@@ -33,12 +33,13 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 // +kops:fitask
 type IAMRole struct {
 	ID        *string
-	Lifecycle *fi.Lifecycle
+	Lifecycle fi.Lifecycle
 
 	Name                *string
 	RolePolicyDocument  fi.Resource // "inline" IAM policy
@@ -142,6 +143,87 @@ func (s *IAMRole) CheckChanges(a, e, changes *IAMRole) error {
 }
 
 func (_ *IAMRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMRole) error {
+	if e.RolePolicyDocument == nil {
+		klog.V(2).Infof("Deleting IAM role %q", a.Name)
+
+		var attachedPolicies []*iam.AttachedPolicy
+		var policyNames []string
+
+		// List Inline policies
+		{
+			request := &iam.ListRolePoliciesInput{
+				RoleName: a.Name,
+			}
+			err := t.Cloud.IAM().ListRolePoliciesPages(request, func(page *iam.ListRolePoliciesOutput, lastPage bool) bool {
+				for _, policy := range page.PolicyNames {
+					policyNames = append(policyNames, aws.StringValue(policy))
+				}
+				return true
+			})
+			if err != nil {
+				if awsup.AWSErrorCode(err) == iam.ErrCodeNoSuchEntityException {
+					klog.V(2).Infof("Got NoSuchEntity describing IAM RolePolicy; will treat as already-deleted")
+					return nil
+				}
+
+				return fmt.Errorf("error listing IAM role policies: %v", err)
+			}
+		}
+
+		// List Attached Policies
+		{
+			request := &iam.ListAttachedRolePoliciesInput{
+				RoleName: a.Name,
+			}
+			err := t.Cloud.IAM().ListAttachedRolePoliciesPages(request, func(page *iam.ListAttachedRolePoliciesOutput, lastPage bool) bool {
+				attachedPolicies = append(attachedPolicies, page.AttachedPolicies...)
+				return true
+			})
+			if err != nil {
+				if awsup.AWSErrorCode(err) == iam.ErrCodeNoSuchEntityException {
+					klog.V(2).Infof("Got NoSuchEntity describing IAM RolePolicy; will treat as already-detached")
+					return nil
+				}
+
+				return fmt.Errorf("error listing IAM role policies for %v", err)
+			}
+		}
+
+		// Delete inline policies
+		for _, policyName := range policyNames {
+			klog.V(2).Infof("Deleting IAM role policy %q", policyName)
+			request := &iam.DeleteRolePolicyInput{
+				RoleName:   a.Name,
+				PolicyName: aws.String(policyName),
+			}
+			_, err := t.Cloud.IAM().DeleteRolePolicy(request)
+			if err != nil {
+				return fmt.Errorf("error deleting IAM role policy %q: %v", policyName, err)
+			}
+		}
+
+		// Detach Managed Policies
+		for _, policy := range attachedPolicies {
+			klog.V(2).Infof("Detaching IAM role policy %q", policy)
+			request := &iam.DetachRolePolicyInput{
+				RoleName:  a.Name,
+				PolicyArn: policy.PolicyArn,
+			}
+			_, err := t.Cloud.IAM().DetachRolePolicy(request)
+			if err != nil {
+				return fmt.Errorf("error detaching IAM role policy %q: %v", *policy.PolicyArn, err)
+			}
+		}
+
+		request := &iam.DeleteRoleInput{
+			RoleName: a.Name,
+		}
+		if _, err := t.Cloud.IAM().DeleteRole(request); err != nil {
+			return fmt.Errorf("error deleting IAM role: %v", err)
+		}
+		return nil
+	}
+
 	policy, err := fi.ResourceAsString(e.RolePolicyDocument)
 	if err != nil {
 		return fmt.Errorf("error rendering RolePolicyDocument: %v", err)
@@ -199,25 +281,19 @@ func (_ *IAMRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMRole) error
 		if changes.PermissionsBoundary != nil {
 			klog.V(2).Infof("Updating IAMRole PermissionsBoundary %q", *e.Name)
 
-			var err error
+			request := &iam.PutRolePermissionsBoundaryInput{}
+			request.RoleName = e.Name
+			request.PermissionsBoundary = e.PermissionsBoundary
 
-			if e.PermissionsBoundary == nil {
-				request := &iam.DeleteRolePermissionsBoundaryInput{}
-				request.RoleName = e.Name
+			if _, err := t.Cloud.IAM().PutRolePermissionsBoundary(request); err != nil {
+				return fmt.Errorf("error updating IAMRole: %v", err)
+			}
+		} else if a.PermissionsBoundary != nil && e.PermissionsBoundary == nil {
+			request := &iam.DeleteRolePermissionsBoundaryInput{}
+			request.RoleName = e.Name
 
-				_, err = t.Cloud.IAM().DeleteRolePermissionsBoundary(request)
-				if err != nil {
-					return fmt.Errorf("error updating IAMRole: %v", err)
-				}
-			} else {
-				request := &iam.PutRolePermissionsBoundaryInput{}
-				request.RoleName = e.Name
-				request.PermissionsBoundary = e.PermissionsBoundary
-
-				_, err = t.Cloud.IAM().PutRolePermissionsBoundary(request)
-				if err != nil {
-					return fmt.Errorf("error updating IAMRole: %v", err)
-				}
+			if _, err := t.Cloud.IAM().DeleteRolePermissionsBoundary(request); err != nil {
+				return fmt.Errorf("error updating IAMRole: %v", err)
 			}
 		}
 		if changes.Tags != nil {
@@ -251,14 +327,14 @@ func (_ *IAMRole) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *IAMRole) error
 }
 
 type terraformIAMRole struct {
-	Name                *string            `json:"name" cty:"name"`
-	AssumeRolePolicy    *terraform.Literal `json:"assume_role_policy" cty:"assume_role_policy"`
-	PermissionsBoundary *string            `json:"permissions_boundary,omitempty" cty:"permissions_boundary"`
-	Tags                map[string]string  `json:"tags,omitempty" cty:"tags"`
+	Name                *string                  `json:"name" cty:"name"`
+	AssumeRolePolicy    *terraformWriter.Literal `json:"assume_role_policy" cty:"assume_role_policy"`
+	PermissionsBoundary *string                  `json:"permissions_boundary,omitempty" cty:"permissions_boundary"`
+	Tags                map[string]string        `json:"tags,omitempty" cty:"tags"`
 }
 
 func (_ *IAMRole) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *IAMRole) error {
-	policy, err := t.AddFile("aws_iam_role", *e.Name, "policy", e.RolePolicyDocument, false)
+	policy, err := t.AddFileResource("aws_iam_role", *e.Name, "policy", e.RolePolicyDocument, false)
 	if err != nil {
 		return fmt.Errorf("error rendering RolePolicyDocument: %v", err)
 	}
@@ -274,15 +350,15 @@ func (_ *IAMRole) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *I
 	}
 
 	if fi.StringValue(e.ExportWithID) != "" {
-		t.AddOutputVariable(*e.ExportWithID+"_role_arn", terraform.LiteralProperty("aws_iam_role", *e.Name, "arn"))
+		t.AddOutputVariable(*e.ExportWithID+"_role_arn", terraformWriter.LiteralProperty("aws_iam_role", *e.Name, "arn"))
 		t.AddOutputVariable(*e.ExportWithID+"_role_name", e.TerraformLink())
 	}
 
 	return t.RenderResource("aws_iam_role", *e.Name, tf)
 }
 
-func (e *IAMRole) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("aws_iam_role", *e.Name, "name")
+func (e *IAMRole) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("aws_iam_role", *e.Name, "name")
 }
 
 type cloudformationIAMRole struct {

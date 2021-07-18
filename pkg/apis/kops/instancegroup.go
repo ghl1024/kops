@@ -186,16 +186,6 @@ type InstanceGroupSpec struct {
 	WarmPool *WarmPoolSpec `json:"warmPool,omitempty"`
 }
 
-type WarmPoolSpec struct {
-	// MinSize is the minimum size of the warm pool.
-	MinSize int64 `json:"minSize,omitempty"`
-	// MaxSize is the maximum size of the warm pool. The desired size of the instance group
-	// is subtracted from this number to determine the desired size of the warm pool
-	// (unless the resulting number is smaller than MinSize).
-	// The default is the instance group's MaxSize.
-	MaxSize *int64 `json:"maxSize,omitempty"`
-}
-
 const (
 	// SpotAllocationStrategyLowestPrices indicates a lowest-price strategy
 	SpotAllocationStrategyLowestPrices = "lowest-price"

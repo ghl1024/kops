@@ -48,7 +48,7 @@ import (
 // EtcdManagerBuilder builds the manifest for the etcd-manager
 type EtcdManagerBuilder struct {
 	*model.KopsModelContext
-	Lifecycle    *fi.Lifecycle
+	Lifecycle    fi.Lifecycle
 	AssetBuilder *assets.AssetBuilder
 }
 
@@ -142,12 +142,23 @@ func (b *EtcdManagerBuilder) Build(c *fi.ModelBuilderContext) error {
 		}
 
 		if etcdCluster.Name == "cilium" {
-			c.AddTask(&fitasks.Keypair{
+			clientsCaCilium := &fitasks.Keypair{
 				Name:      fi.String("etcd-clients-ca-cilium"),
 				Lifecycle: b.Lifecycle,
 				Subject:   "cn=etcd-clients-ca-cilium",
 				Type:      "ca",
-			})
+			}
+			c.AddTask(clientsCaCilium)
+
+			if !b.UseKopsControllerForNodeBootstrap() {
+				c.AddTask(&fitasks.Keypair{
+					Name:      fi.String("etcd-client-cilium"),
+					Lifecycle: b.Lifecycle,
+					Subject:   "cn=cilium",
+					Type:      "client",
+					Signer:    clientsCaCilium,
+				})
+			}
 		}
 	}
 
@@ -172,7 +183,7 @@ metadata:
   namespace: kube-system
 spec:
   containers:
-  - image: kopeio/etcd-manager:3.0.20210228
+  - image: k8s.gcr.io/etcdadm/etcd-manager:3.0.20210707
     name: etcd-manager
     resources:
       requests:
@@ -185,6 +196,8 @@ spec:
     # TODO: Would be nice to scope this more tightly, but needed for volume mounting
     - mountPath: /rootfs
       name: rootfs
+    - mountPath: /run
+      name: run
     - mountPath: /etc/kubernetes/pki/etcd-manager
       name: pki
   hostNetwork: true
@@ -194,6 +207,10 @@ spec:
       path: /
       type: Directory
     name: rootfs
+  - hostPath:
+      path: /run
+      type: DirectoryOrCreate
+    name: run
   - hostPath:
       path: /etc/kubernetes/pki/etcd-manager
       type: DirectoryOrCreate
@@ -236,18 +253,6 @@ func (b *EtcdManagerBuilder) buildPod(etcdCluster kops.EtcdClusterSpec) (*v1.Pod
 		}
 	}
 
-	// With etcd-manager the hosts changes are self-contained, so
-	// we don't need to share /etc/hosts.  By not sharing we avoid
-	// (1) the temptation to address etcd directly and (2)
-	// problems of concurrent updates to /etc/hosts being hard
-	// from within a container (because locking is very difficult
-	// across bind mounts).
-	//
-	// Introduced with 1.17 to avoid changing existing versions.
-	if b.IsKubernetesLT("1.17") {
-		kubemanifest.MapEtcHosts(pod, container, false)
-	}
-
 	// Remap image via AssetBuilder
 	{
 		remapped, err := b.AssetBuilder.RemapImage(container.Image)
@@ -257,7 +262,6 @@ func (b *EtcdManagerBuilder) buildPod(etcdCluster kops.EtcdClusterSpec) (*v1.Pod
 		container.Image = remapped
 	}
 
-	etcdInsecure := !b.UseEtcdTLS()
 	var clientHost string
 
 	if featureflag.APIServerNodes.Enabled() {
@@ -321,6 +325,9 @@ func (b *EtcdManagerBuilder) buildPod(etcdCluster kops.EtcdClusterSpec) (*v1.Pod
 		peerPort = 2382
 		grpcPort = wellknownports.EtcdCiliumGRPC
 		quarantinedClientPort = wellknownports.EtcdCiliumQuarantinedClientPort
+		if !featureflag.APIServerNodes.Enabled() {
+			clientHost = b.Cluster.Spec.MasterInternalName
+		}
 	default:
 		return nil, fmt.Errorf("unknown etcd cluster key %q", etcdCluster.Name)
 	}
@@ -342,7 +349,6 @@ func (b *EtcdManagerBuilder) buildPod(etcdCluster kops.EtcdClusterSpec) (*v1.Pod
 		BackupStore:   backupStore,
 		GrpcPort:      grpcPort,
 		DNSSuffix:     dnsInternalSuffix,
-		EtcdInsecure:  etcdInsecure,
 	}
 
 	config.LogLevel = 6
@@ -556,12 +562,6 @@ type config struct {
 
 	// PKIDir is set to the directory for PKI keys, used to secure commucations between etcd-manager peers
 	PKIDir string `flag:"pki-dir"`
-
-	// Insecure can be used to turn off tls for etcd-manager (compare with EtcdInsecure)
-	Insecure bool `flag:"insecure"`
-
-	// EtcdInsecure can be used to turn off tls for etcd itself (compare with Insecure)
-	EtcdInsecure bool `flag:"etcd-insecure"`
 
 	Address               string   `flag:"address"`
 	PeerUrls              string   `flag:"peer-urls"`

@@ -44,27 +44,27 @@ func TestBootstrapChannelBuilder_BuildTasks(t *testing.T) {
 
 	h.SetupMockAWS()
 
-	runChannelBuilderTest(t, "simple", []string{"dns-controller.addons.k8s.io-k8s-1.12", "kops-controller.addons.k8s.io-k8s-1.16"})
+	runChannelBuilderTest(t, "simple", []string{"kops-controller.addons.k8s.io-k8s-1.16"})
 	// Use cilium networking, proxy
-	runChannelBuilderTest(t, "cilium", []string{"dns-controller.addons.k8s.io-k8s-1.12", "kops-controller.addons.k8s.io-k8s-1.16"})
+	runChannelBuilderTest(t, "cilium", []string{"kops-controller.addons.k8s.io-k8s-1.16"})
 	runChannelBuilderTest(t, "weave", []string{})
-	runChannelBuilderTest(t, "amazonvpc", []string{"networking.amazon-vpc-routed-eni-k8s-1.12", "networking.amazon-vpc-routed-eni-k8s-1.16"})
-	runChannelBuilderTest(t, "amazonvpc-containerd", []string{"networking.amazon-vpc-routed-eni-k8s-1.12", "networking.amazon-vpc-routed-eni-k8s-1.16"})
+	runChannelBuilderTest(t, "amazonvpc", []string{"networking.amazon-vpc-routed-eni-k8s-1.16"})
+	runChannelBuilderTest(t, "amazonvpc-containerd", []string{"networking.amazon-vpc-routed-eni-k8s-1.16"})
 	runChannelBuilderTest(t, "awsiamauthenticator", []string{"authentication.aws-k8s-1.12"})
 }
 
-func TestBootstrapChannelBuilder_PublicJWKS(t *testing.T) {
+func TestBootstrapChannelBuilder_ServiceAccountIAM(t *testing.T) {
 	h := testutils.NewIntegrationTestHarness(t)
 	defer h.Close()
 
 	h.SetupMockAWS()
 
-	featureflag.ParseFlags("+PublicJWKS,+UseServiceAccountIAM")
+	featureflag.ParseFlags("+UseServiceAccountIAM")
 	unsetFeatureFlag := func() {
-		featureflag.ParseFlags("-PublicJWKS,-UseServiceAccountIAM")
+		featureflag.ParseFlags("-UseServiceAccountIAM")
 	}
 	defer unsetFeatureFlag()
-	runChannelBuilderTest(t, "public-jwks", []string{"dns-controller.addons.k8s.io-k8s-1.12", "kops-controller.addons.k8s.io-k8s-1.16", "anonymous-issuer-discovery.addons.k8s.io-k8s-1.16"})
+	runChannelBuilderTest(t, "service-account-iam", []string{"dns-controller.addons.k8s.io-k8s-1.12", "kops-controller.addons.k8s.io-k8s-1.16"})
 }
 
 func TestBootstrapChannelBuilder_AWSCloudController(t *testing.T) {
@@ -73,11 +73,6 @@ func TestBootstrapChannelBuilder_AWSCloudController(t *testing.T) {
 
 	h.SetupMockAWS()
 
-	featureflag.ParseFlags("+EnableExternalCloudController")
-	unsetFeatureFlag := func() {
-		featureflag.ParseFlags("-EnableExternalCloudController")
-	}
-	defer unsetFeatureFlag()
 	runChannelBuilderTest(t, "awscloudcontroller", []string{"aws-cloud-controller.addons.k8s.io-k8s-1.18"})
 }
 
@@ -160,8 +155,8 @@ func runChannelBuilderTest(t *testing.T, key string, addonManifests []string) {
 
 	bcb := bootstrapchannelbuilder.NewBootstrapChannelBuilder(
 		&kopsModel,
-		nil,
-		assets.NewAssetBuilder(cluster, ""),
+		fi.LifecycleSync,
+		assets.NewAssetBuilder(cluster, false),
 		templates,
 		nil,
 	)

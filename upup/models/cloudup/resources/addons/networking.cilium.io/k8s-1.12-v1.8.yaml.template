@@ -149,9 +149,12 @@ data:
   # - auto (automatically detect the container runtime)
   #
   container-runtime: "{{ .ContainerRuntimeLabels }}"
-  masquerade: "{{- if .DisableMasquerade -}}false{{- else -}}true{{- end -}}"
+  masquerade: "{{- if WithDefaultBool .DisableMasquerade false -}}false{{- else -}}true{{- end -}}"
   install-iptables-rules: "{{- if .IPTablesRulesNoinstall -}}false{{- else -}}true{{- end -}}"
   auto-direct-node-routes: "{{ .AutoDirectNodeRoutes }}"
+  {{ if .EnableHostReachableServices }}
+  enable-host-reachable-services: "{{ .EnableHostReachableServices }}"
+  {{ end }}
   enable-node-port: "{{ .EnableNodePort }}"
   kube-proxy-replacement: "{{- if .EnableNodePort -}}strict{{- else -}}partial{{- end -}}"
   enable-remote-node-identity: "{{ .EnableRemoteNodeIdentity -}}"
@@ -414,6 +417,12 @@ spec:
         # gets priority scheduling.
         # https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
         scheduler.alpha.kubernetes.io/critical-pod: ""
+        {{ if .Networking.Cilium.EnablePrometheusMetrics }}
+        # Annotation required for prometheus auto-discovery scraping
+        # https://docs.cilium.io/en/v1.9/operations/metrics/#installation
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ printf "%q" .Networking.Cilium.AgentPrometheusPort }}
+        {{ end }}
       labels:
         k8s-app: cilium
         kubernetes.io/cluster-service: "true"
@@ -479,7 +488,7 @@ spec:
           value: {{ . }}
         {{ end }}
 {{ with .Networking.Cilium }}
-        image: "docker.io/cilium/cilium:{{ .Version  }}"
+        image: "quay.io/cilium/cilium:{{ .Version  }}"
         imagePullPolicy: IfNotPresent
         lifecycle:
           postStart:
@@ -603,7 +612,7 @@ spec:
               key: wait-bpf-mount
               name: cilium-config
               optional: true
-        image: "docker.io/cilium/cilium:{{ .Version }}"
+        image: "quay.io/cilium/cilium:{{ .Version }}"
 ## end of `with .Networking.Cilium`
 #{{ end }}
         imagePullPolicy: IfNotPresent
@@ -765,7 +774,7 @@ spec:
         - name: KUBERNETES_SERVICE_PORT
           value: "443"
 {{ with .Networking.Cilium }}
-        image: "docker.io/cilium/operator:{{ .Version }}"
+        image: "quay.io/cilium/operator:{{ .Version }}"
         imagePullPolicy: IfNotPresent
         name: cilium-operator
         {{ if .EnablePrometheusMetrics }}
@@ -892,7 +901,7 @@ spec:
             topologyKey: "kubernetes.io/hostname"
       containers:
         - name: hubble-relay
-          image: "docker.io/cilium/hubble-relay:{{ .Version }}"
+          image: "quay.io/cilium/hubble-relay:{{ .Version }}"
           imagePullPolicy: IfNotPresent
           command:
             - "hubble-relay"

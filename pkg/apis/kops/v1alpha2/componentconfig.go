@@ -45,6 +45,10 @@ type KubeletConfigSpec struct {
 	KubeconfigPath string `json:"kubeconfigPath,omitempty" flag:"kubeconfig"`
 	// RequireKubeconfig indicates a kubeconfig is required
 	RequireKubeconfig *bool `json:"requireKubeconfig,omitempty" flag:"require-kubeconfig"`
+	// LogFormat is the logging format of the kubelet.
+	// Supported values: text, json.
+	// Default: text
+	LogFormat string `json:"logFormat,omitempty" flag:"logging-format" flag-empty:"text"`
 	// LogLevel is the logging level of the kubelet
 	LogLevel *int32 `json:"logLevel,omitempty" flag:"v" flag-empty:"0"`
 	// config is the path to the config file or directory of files
@@ -217,6 +221,8 @@ type KubeletConfigSpec struct {
 	ContainerLogMaxFiles *int32 `json:"containerLogMaxFiles,omitempty" flag:"container-log-max-files"`
 	// EnableCadvisorJsonEndpoints enables cAdvisor json `/spec` and `/stats/*` endpoints. Defaults to False.
 	EnableCadvisorJsonEndpoints *bool `json:"enableCadvisorJsonEndpoints,omitempty" flag:"enable-cadvisor-json-endpoints"`
+	// PodPidsLimit is the maximum number of pids in any pod.
+	PodPidsLimit *int64 `json:"podPidsLimit,omitempty" flag:"pod-max-pids"`
 }
 
 // KubeProxyConfig defines the configuration for a proxy
@@ -269,6 +275,10 @@ type KubeAPIServerConfig struct {
 	Image string `json:"image,omitempty"`
 	// DisableBasicAuth removes the --basic-auth-file flag
 	DisableBasicAuth *bool `json:"disableBasicAuth,omitempty"`
+	// LogFormat is the logging format of the api.
+	// Supported values: text, json.
+	// Default: text
+	LogFormat string `json:"logFormat,omitempty" flag:"logging-format" flag-empty:"text"`
 	// LogLevel is the logging level of the api
 	LogLevel int32 `json:"logLevel,omitempty" flag:"v" flag-empty:"0"`
 	// CloudProvider is the name of the cloudProvider we are using, aws, gce etcd
@@ -511,6 +521,10 @@ type KubeAPIServerConfig struct {
 type KubeControllerManagerConfig struct {
 	// Master is the url for the kube api master
 	Master string `json:"master,omitempty" flag:"master"`
+	// LogFormat is the logging format of the controler manager.
+	// Supported values: text, json.
+	// Default: text
+	LogFormat string `json:"logFormat,omitempty" flag:"logging-format" flag-empty:"text"`
 	// LogLevel is the defined logLevel
 	LogLevel int32 `json:"logLevel,omitempty" flag:"v" flag-empty:"0"`
 	// ServiceAccountPrivateKeyFile is the location of the private key for service account token signing.
@@ -662,6 +676,10 @@ type CloudControllerManagerConfig struct {
 type KubeSchedulerConfig struct {
 	// Master is a url to the kube master
 	Master string `json:"master,omitempty" flag:"master"`
+	// LogFormat is the logging format of the scheduler.
+	// Supported values: text, json.
+	// Default: text
+	LogFormat string `json:"logFormat,omitempty" flag:"logging-format" flag-empty:"text"`
 	// LogLevel is the logging level
 	LogLevel int32 `json:"logLevel,omitempty" flag:"v"`
 	// Image is the docker image to use
@@ -835,8 +853,27 @@ type CloudConfiguration struct {
 
 // AWSEBSCSIDriver is the config for the AWS EBS CSI driver
 type AWSEBSCSIDriver struct {
-	//Enabled enables the AWS EBS CSI driver
+	// Enabled enables the AWS EBS CSI driver
+	// Default: false
 	Enabled *bool `json:"enabled,omitempty"`
+
+	// Version is the container image tag used.
+	// Default: The latest stable release which is compatible with your Kubernetes version
+	Version *string `json:"version,omitempty"`
+
+	// VolumeAttachLimit is the maximum number of volumes attachable per node.
+	// If specified, the limit applies to all nodes.
+	// If not specified, the value is approximated from the instance type.
+	// Default: -
+	VolumeAttachLimit *int `json:"volumeAttachLimit,omitempty"`
+}
+
+// SnapshotControllerConfig is the config for the CSI Snapshot Controller
+type SnapshotControllerConfig struct {
+	//Enabled enables the CSI Snapshot Controller
+	Enabled *bool `json:"enabled,omitempty"`
+	//InstallDefaultClass will install the default VolumeSnapshotClass
+	InstallDefaultClass bool `json:"installDefaultClass,omitempty"`
 }
 
 // NodeTerminationHandlerConfig determines the node termination handler configuration.
@@ -853,6 +890,41 @@ type NodeTerminationHandlerConfig struct {
 
 	// EnablePrometheusMetrics enables the "/metrics" endpoint.
 	EnablePrometheusMetrics *bool `json:"prometheusEnable,omitempty"`
+
+	// EnableSQSTerminationDraining enables queue-processor mode which drains nodes when an SQS termination event is received.
+	EnableSQSTerminationDraining *bool `json:"enableSQSTerminationDraining,omitempty"`
+
+	// ManagedASGTag is the tag used to determine which nodes NTH can take action on
+	ManagedASGTag *string `json:"managedASGTag,omitempty"`
+
+	// MemoryRequest of NodeTerminationHandler container.
+	// Default: 64Mi
+	MemoryRequest *resource.Quantity `json:"memoryRequest,omitempty"`
+	// CPURequest of NodeTerminationHandler container.
+	// Default: 50m
+	CPURequest *resource.Quantity `json:"cpuRequest,omitempty"`
+}
+
+// NodeProblemDetector determines the node problem detector configuration.
+type NodeProblemDetectorConfig struct {
+	// Enabled enables the NodeProblemDetector.
+	// Default: false
+	Enabled *bool `json:"enabled,omitempty"`
+	// Image is the NodeProblemDetector docker container used.
+	Image *string `json:"image,omitempty"`
+
+	// MemoryRequest of NodeProblemDetector container.
+	// Default: 80Mi
+	MemoryRequest *resource.Quantity `json:"memoryRequest,omitempty"`
+	// CPURequest of NodeProblemDetector container.
+	// Default: 10m
+	CPURequest *resource.Quantity `json:"cpuRequest,omitempty"`
+	// MemoryLimit of NodeProblemDetector container.
+	// Default: 80Mi
+	MemoryLimit *resource.Quantity `json:"memoryLimit,omitempty"`
+	// CPULimit of NodeProblemDetector container.
+	// Default: 10m
+	CPULimit *resource.Quantity `json:"cpuLimit,omitempty"`
 }
 
 // ClusterAutoscalerConfig determines the cluster autoscaler configuration.
@@ -912,9 +984,17 @@ type CertManagerConfig struct {
 	// Default: false
 	Enabled *bool `json:"enabled,omitempty"`
 
+	// Managed controls if cert-manager is manged and deployed by kOps.
+	// The deployment of cert-manager is skipped if this is set to false.
+	Managed *bool `json:"managed,omitempty"`
+
 	// Image is the docker container used.
 	// Default: the latest supported image for the specified kubernetes version.
 	Image *string `json:"image,omitempty"`
+
+	// defaultIssuer sets a default clusterIssuer
+	// Default: none
+	DefaultIssuer *string `json:"defaultIssuer,omitempty"`
 }
 
 // AWSLoadBalancerControllerConfig determines the AWS LB controller configuration.

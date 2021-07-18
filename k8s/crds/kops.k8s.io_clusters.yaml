@@ -237,6 +237,10 @@ spec:
               certManager:
                 description: CertManager determines the metrics server configuration.
                 properties:
+                  defaultIssuer:
+                    description: 'defaultIssuer sets a default clusterIssuer Default:
+                      none'
+                    type: string
                   enabled:
                     description: 'Enabled enables the cert manager. Default: false'
                     type: boolean
@@ -244,6 +248,11 @@ spec:
                     description: 'Image is the docker container used. Default: the
                       latest supported image for the specified kubernetes version.'
                     type: string
+                  managed:
+                    description: Managed controls if cert-manager is manged and deployed
+                      by kOps. The deployment of cert-manager is skipped if this is
+                      set to false.
+                    type: boolean
                 type: object
               channel:
                 description: The Channel we are following
@@ -256,8 +265,20 @@ spec:
                       driver
                     properties:
                       enabled:
-                        description: Enabled enables the AWS EBS CSI driver
+                        description: 'Enabled enables the AWS EBS CSI driver Default:
+                          false'
                         type: boolean
+                      version:
+                        description: 'Version is the container image tag used. Default:
+                          The latest stable release which is compatible with your
+                          Kubernetes version'
+                        type: string
+                      volumeAttachLimit:
+                        description: 'VolumeAttachLimit is the maximum number of volumes
+                          attachable per node. If specified, the limit applies to
+                          all nodes. If not specified, the value is approximated from
+                          the instance type. Default: -'
+                        type: integer
                     type: object
                   azure:
                     description: Azure cloud-config options
@@ -1142,6 +1163,39 @@ spec:
                     type: boolean
                   permissionsBoundary:
                     type: string
+                  serviceAccountExternalPermissions:
+                    description: ServiceAccountExternalPermissions defines the relatinship
+                      between Kubernetes ServiceAccounts and permissions with external
+                      resources.
+                    items:
+                      description: ServiceAccountExternalPermissions grants a ServiceAccount
+                        permissions to external resources.
+                      properties:
+                        aws:
+                          description: AWS grants permissions to AWS resources.
+                          properties:
+                            inlinePolicy:
+                              description: InlinePolicy is an IAM Policy that will
+                                be attached inline to the IAM Role.
+                              type: string
+                            policyARNs:
+                              description: PolicyARNs is a list of existing IAM Policies.
+                              items:
+                                type: string
+                              type: array
+                          type: object
+                        name:
+                          description: Name is the name of the Kubernetes ServiceAccount.
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace of the Kubernetes
+                            ServiceAccount.
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    type: array
                 required:
                 - legacy
                 type: object
@@ -1456,6 +1510,10 @@ spec:
                     items:
                       type: string
                     type: array
+                  logFormat:
+                    description: 'LogFormat is the logging format of the api. Supported
+                      values: text, json. Default: text'
+                    type: string
                   logLevel:
                     description: LogLevel is the logging level of the api
                     format: int32
@@ -1863,6 +1921,10 @@ spec:
                           is enabled.
                         type: string
                     type: object
+                  logFormat:
+                    description: 'LogFormat is the logging format of the controler
+                      manager. Supported values: text, json. Default: text'
+                    type: string
                   logLevel:
                     description: LogLevel is the defined logLevel
                     format: int32
@@ -2205,6 +2267,10 @@ spec:
                           is enabled.
                         type: string
                     type: object
+                  logFormat:
+                    description: 'LogFormat is the logging format of the scheduler.
+                      Supported values: text, json. Default: text'
+                    type: string
                   logLevel:
                     description: LogLevel is the logging level
                     format: int32
@@ -2450,6 +2516,10 @@ spec:
                     description: KubeletCgroups is the absolute name of cgroups to
                       isolate the kubelet in.
                     type: string
+                  logFormat:
+                    description: 'LogFormat is the logging format of the kubelet.
+                      Supported values: text, json. Default: text'
+                    type: string
                   logLevel:
                     description: LogLevel is the logging level of the kubelet
                     format: int32
@@ -2502,6 +2572,11 @@ spec:
                     description: config is the path to the config file or directory
                       of files
                     type: string
+                  podPidsLimit:
+                    description: PodPidsLimit is the maximum number of pids in any
+                      pod.
+                    format: int64
+                    type: integer
                   protectKernelDefaults:
                     description: 'Default kubelet behaviour for kernel tuning. If
                       set, kubelet errors if any of kernel tunables is different than
@@ -2856,6 +2931,10 @@ spec:
                     description: KubeletCgroups is the absolute name of cgroups to
                       isolate the kubelet in.
                     type: string
+                  logFormat:
+                    description: 'LogFormat is the logging format of the kubelet.
+                      Supported values: text, json. Default: text'
+                    type: string
                   logLevel:
                     description: LogLevel is the logging level of the kubelet
                     format: int32
@@ -2908,6 +2987,11 @@ spec:
                     description: config is the path to the config file or directory
                       of files
                     type: string
+                  podPidsLimit:
+                    description: PodPidsLimit is the maximum number of pids in any
+                      pod.
+                    format: int64
+                    type: integer
                   protectKernelDefaults:
                     description: 'Default kubelet behaviour for kernel tuning. If
                       set, kubelet errors if any of kernel tunables is different than
@@ -3094,7 +3178,11 @@ spec:
                           type: object
                         type: array
                       imageName:
-                        description: The container image name to use
+                        description: ImageName is the container image name to use.
+                        type: string
+                      initImageName:
+                        description: InitImageName is the init container image name
+                          to use.
                         type: string
                     type: object
                   calico:
@@ -3103,8 +3191,8 @@ spec:
                     properties:
                       awsSrcDstCheck:
                         description: 'AWSSrcDstCheck enables/disables ENI source/destination
-                          checks (AWS only) Options: DoNothing (default), Enable,
-                          or Disable'
+                          checks (AWS only) Options: Disable (default), Enable, or
+                          DoNothing'
                         type: string
                       bpfEnabled:
                         description: BPFEnabled enables the eBPF dataplane mode.
@@ -3147,8 +3235,8 @@ spec:
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                       crossSubnet:
-                        description: CrossSubnet enables Calico's cross-subnet mode
-                          when set to true
+                        description: CrossSubnet is deprecated as of kOps 1.22 and
+                          has no effect
                         type: boolean
                       encapsulationMode:
                         description: 'EncapsulationMode specifies the network packet
@@ -3160,11 +3248,12 @@ spec:
                           or vxlan'
                         type: string
                       ipipMode:
-                        description: IPIPMode is the encapsulation mode to use for
-                          the default Calico IPv4 pool created at start up, determining
-                          when to use IP-in-IP encapsulation, conveyed to the "calico-node"
-                          daemon container via the CALICO_IPV4POOL_IPIP environment
-                          variable.
+                        description: 'IPIPMode determines when to use IP-in-IP encapsulation
+                          for the default Calico IPv4 pool. It is conveyed to the
+                          "calico-node" daemon container via the CALICO_IPV4POOL_IPIP
+                          environment variable. EncapsulationMode must be set to "ipip".
+                          Options: "CrossSubnet", "Always", or "Never". Default: "CrossSubnet"
+                          if EncapsulationMode is "ipip", "Never" otherwise.'
                         type: string
                       iptablesBackend:
                         description: 'IptablesBackend controls which variant of iptables
@@ -3240,6 +3329,14 @@ spec:
                         description: Version overrides the Calico container image
                           tag.
                         type: string
+                      vxlanMode:
+                        description: 'VXLANMode determines when to use VXLAN encapsulation
+                          for the default Calico IPv4 pool. It is conveyed to the
+                          "calico-node" daemon container via the CALICO_IPV4POOL_VXLAN
+                          environment variable. EncapsulationMode must be set to "vxlan".
+                          Options: "CrossSubnet", "Always", or "Never". Default: "CrossSubnet"
+                          if EncapsulationMode is "vxlan", "Never" otherwise.'
+                        type: string
                       wireguardEnabled:
                         description: 'WireguardEnabled enables WireGuard encryption
                           for all on-the-wire pod-to-pod traffic (default: false)'
@@ -3276,7 +3373,7 @@ spec:
                         type: boolean
                       disableTxChecksumOffloading:
                         description: DisableTxChecksumOffloading is deprecated as
-                          of kops 1.19 and has no effect
+                          of kOps 1.19 and has no effect.
                         type: boolean
                       iptablesBackend:
                         description: 'IptablesBackend controls which variant of iptables
@@ -3370,6 +3467,31 @@ spec:
                         description: 'BPFCTGlobalTCPMax is the maximum number of entries
                           in the TCP CT table. Default: 524288'
                         type: integer
+                      bpfLBAlgorithm:
+                        description: 'BPFLBAlgorithm is the load balancing algorithm
+                          ("random", "maglev"). Default: random'
+                        type: string
+                      bpfLBMaglevTableSize:
+                        description: 'BPFLBMaglevTableSize is the per service backend
+                          table size when going with Maglev (parameter M). Default:
+                          16381'
+                        type: string
+                      bpfLBMapMax:
+                        description: 'BPFLBMapMax is the maximum number of entries
+                          in bpf lb service, backend and affinity maps. Default: 65536'
+                        type: integer
+                      bpfNATGlobalMax:
+                        description: 'BPFNATGlobalMax is the the maximum number of
+                          entries in the BPF NAT table. Default: 524288'
+                        type: integer
+                      bpfNeighGlobalMax:
+                        description: 'BPFNeighGlobalMax is the the maximum number
+                          of entries in the BPF Neighbor table. Default: 524288'
+                        type: integer
+                      bpfPolicyMapMax:
+                        description: 'BPFPolicyMapMax is the maximum number of entries
+                          in endpoint policy map. Default: 16384'
+                        type: integer
                       bpfRoot:
                         description: BPFRoot is not implemented and may be removed
                           in the future. Setting this has no effect.
@@ -3427,6 +3549,10 @@ spec:
                         description: DisableConntrack is not implemented and may be
                           removed in the future. Setting this has no effect.
                         type: boolean
+                      disableEndpointCRD:
+                        description: 'DisableEndpointCRD disables usage of CiliumEndpoint
+                          CRD. Default: false'
+                        type: boolean
                       disableIpv4:
                         description: 'DisableIpv4 is deprecated: Use EnableIpv4 instead.
                           Setting this flag has no effect.'
@@ -3439,9 +3565,28 @@ spec:
                         description: DisableMasquerade disables masquerading traffic
                           to external destinations behind the node IP.
                         type: boolean
+                      enableBPFMasquerade:
+                        description: 'EnableBPFMasquerade enables masquerading packets
+                          from endpoints leaving the host with BPF instead of iptables.
+                          Default: false'
+                        type: boolean
                       enableEncryption:
                         description: 'EnableEncryption enables Cilium Encryption.
                           Default: false'
+                        type: boolean
+                      enableEndpointHealthChecking:
+                        description: 'EnableEndpointHealthChecking enables connectivity
+                          health checking between virtual endpoints. Default: true'
+                        type: boolean
+                      enableHostReachableServices:
+                        description: 'EnableHostReachableServices configures Cilium
+                          to enable services to be reached from the host namespace
+                          in addition to pod namespaces. https://docs.cilium.io/en/v1.9/gettingstarted/host-services/
+                          Default: false'
+                        type: boolean
+                      enableL7Proxy:
+                        description: 'EnableL7Proxy enables L7 proxy for L7 policy
+                          enforcement. Default: true'
                         type: boolean
                       enableNodePort:
                         description: 'EnableNodePort replaces kube-proxy with Cilium''s
@@ -3490,8 +3635,8 @@ spec:
                           agent.
                         properties:
                           enabled:
-                            description: Enabled specifies whether Hubble is enabled
-                              on the agent.
+                            description: Enabled decides if Hubble is enabled on the
+                              agent or not
                             type: boolean
                           metrics:
                             description: Metrics is a list of metrics to collect.
@@ -3500,6 +3645,14 @@ spec:
                               type: string
                             type: array
                         type: object
+                      identityAllocationMode:
+                        description: 'IdentityAllocationMode specifies in which backend
+                          identities are stored ("crd", "kvstore"). Default: crd'
+                        type: string
+                      identityChangeGracePeriod:
+                        description: 'IdentityChangeGracePeriod specifies the duration
+                          to wait before using a changed identity. Default: 5s'
+                        type: string
                       ipam:
                         description: Ipam specifies the IP address allocation mode
                           to use. Possible values are "crd" and "eni". "eni" will
@@ -3507,7 +3660,8 @@ spec:
                           to be set to false. "crd" will use CRDs for controlling
                           IP address management. "hostscope" will use hostscope IPAM
                           mode. "kubernetes" will use addersing based on node pod
-                          CIDR. Empty value will use host-scope address management.
+                          CIDR. Empty value will use hostscope for cilum <= 1.7 and
+                          "kubernetes" otherwise.
                         type: string
                       ipv4ClusterCidrMaskSize:
                         description: Ipv4ClusterCIDRMaskSize is not implemented and
@@ -3697,7 +3851,7 @@ spec:
                   classic:
                     description: ClassicNetworkingSpec is the specification of classic
                       networking mode, integrated into kubernetes. Support been removed
-                      since kubernetes 1.4.
+                      since Kubernetes 1.4.
                     type: object
                   cni:
                     description: CNINetworkingSpec is the specification for networking
@@ -3722,7 +3876,7 @@ spec:
                         type: string
                       disableTxChecksumOffloading:
                         description: DisableTxChecksumOffloading is deprecated as
-                          of kops 1.19 and has no effect
+                          of kOps 1.19 and has no effect.
                         type: boolean
                       iptablesResyncSeconds:
                         description: IptablesResyncSeconds sets resync period for
@@ -3748,7 +3902,7 @@ spec:
                     type: object
                   lyftvpc:
                     description: LyftVPCNetworkingSpec declares that we want to use
-                      the cni-ipvlan-vpc-k8s CNI networking
+                      the cni-ipvlan-vpc-k8s CNI networking.
                     properties:
                       subnetTags:
                         additionalProperties:
@@ -3757,8 +3911,8 @@ spec:
                     type: object
                   romana:
                     description: RomanaNetworkingSpec declares that we want Romana
-                      networking Romana is deprecated as of kops 1.18 and removed
-                      as of kops 1.19
+                      networking Romana is deprecated as of kOps 1.18 and removed
+                      as of kOps 1.19.
                     properties:
                       daemonServiceIP:
                         description: DaemonServiceIP is the Kubernetes Service IP
@@ -3902,10 +4056,67 @@ spec:
                 items:
                   type: string
                 type: array
+              nodeProblemDetector:
+                description: NodeProblemDetector determines the node problem detector
+                  configuration.
+                properties:
+                  cpuLimit:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: 'CPULimit of NodeProblemDetector container. Default:
+                      10m'
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  cpuRequest:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: 'CPURequest of NodeProblemDetector container. Default:
+                      10m'
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  enabled:
+                    description: 'Enabled enables the NodeProblemDetector. Default:
+                      false'
+                    type: boolean
+                  image:
+                    description: Image is the NodeProblemDetector docker container
+                      used.
+                    type: string
+                  memoryLimit:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: 'MemoryLimit of NodeProblemDetector container. Default:
+                      80Mi'
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  memoryRequest:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: 'MemoryRequest of NodeProblemDetector container.
+                      Default: 80Mi'
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                type: object
               nodeTerminationHandler:
                 description: NodeTerminationHandler determines the cluster autoscaler
                   configuration.
                 properties:
+                  cpuRequest:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: 'CPURequest of NodeTerminationHandler container.
+                      Default: 50m'
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  enableSQSTerminationDraining:
+                    description: EnableSQSTerminationDraining enables queue-processor
+                      mode which drains nodes when an SQS termination event is received.
+                    type: boolean
                   enableScheduledEventDraining:
                     description: 'EnableScheduledEventDraining makes node termination
                       handler drain nodes before the maintenance window starts for
@@ -3920,6 +4131,18 @@ spec:
                     description: 'Enabled enables the node termination handler. Default:
                       true'
                     type: boolean
+                  managedASGTag:
+                    description: ManagedASGTag is the tag used to determine which
+                      nodes NTH can take action on
+                    type: string
+                  memoryRequest:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: 'MemoryRequest of NodeTerminationHandler container.
+                      Default: 64Mi'
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
                   prometheusEnable:
                     description: EnablePrometheusMetrics enables the "/metrics" endpoint.
                     type: boolean
@@ -3944,10 +4167,6 @@ spec:
               project:
                 description: Project is the cloud project we should use, required
                   on GCE
-                type: string
-              publicDataStore:
-                description: PublicDataStore is the VFS path to where public data
-                  is stored
                 type: string
               rollingUpdate:
                 description: RollingUpdate defines the default rolling-update settings
@@ -3991,10 +4210,34 @@ spec:
               secretStore:
                 description: SecretStore is the VFS path to where secrets are stored
                 type: string
+              serviceAccountIssuerDiscovery:
+                description: ServiceAccountIssuerDiscovery configures the OIDC Issuer
+                  for ServiceAccounts.
+                properties:
+                  discoveryStore:
+                    description: DiscoveryStore is the VFS path to where OIDC Issuer
+                      Discovery metadata is stored.
+                    type: string
+                  enableAWSOIDCProvider:
+                    description: EnableAWSOIDCProvider will provision an AWS OIDC
+                      provider that trusts the ServiceAccount Issuer
+                    type: boolean
+                type: object
               serviceClusterIPRange:
                 description: ServiceClusterIPRange is the CIDR, from the internal
                   network, where we allocate IPs for services
                 type: string
+              snapshotController:
+                description: SnapshotController defines the CSI Snapshot Controller
+                  configuration.
+                properties:
+                  enabled:
+                    description: Enabled enables the CSI Snapshot Controller
+                    type: boolean
+                  installDefaultClass:
+                    description: InstallDefaultClass will install the default VolumeSnapshotClass
+                    type: boolean
+                type: object
               sshAccess:
                 description: SSHAccess determines the permitted access to SSH Currently
                   only a single CIDR is supported (though a richer grammar could be
@@ -4010,6 +4253,7 @@ spec:
                 items:
                   properties:
                     cidr:
+                      description: CIDR is the IPv4 CIDR block assigned to the subnet.
                       type: string
                     egress:
                       description: Egress defines the method of traffic egress for
@@ -4018,6 +4262,10 @@ spec:
                     id:
                       description: ProviderID is the cloud provider id for the objects
                         associated with the zone (the subnet on AWS)
+                      type: string
+                    ipv6CIDR:
+                      description: IPv6CIDR is the IPv6 CIDR block assigned to the
+                        subnet.
                       type: string
                     name:
                       type: string
@@ -4117,6 +4365,29 @@ spec:
                   needed containers. This is needed if some APIs do have self-signed
                   certs
                 type: boolean
+              warmPool:
+                description: WarmPool defines the default warm pool settings for instance
+                  groups (AWS only).
+                properties:
+                  enableLifecycleHook:
+                    description: EnableLifecycleHook determines if an ASG lifecycle
+                      hook will be added ensuring that nodeup runs to completion.
+                      Note that the metadata API must be protected from arbitrary
+                      Pods when this is enabled.
+                    type: boolean
+                  maxSize:
+                    description: MaxSize is the maximum size of the warm pool. The
+                      desired size of the instance group is subtracted from this number
+                      to determine the desired size of the warm pool (unless the resulting
+                      number is smaller than MinSize). The default is the instance
+                      group's MaxSize.
+                    format: int64
+                    type: integer
+                  minSize:
+                    description: MinSize is the minimum size of the pool
+                    format: int64
+                    type: integer
+                type: object
             type: object
         type: object
     served: true

@@ -101,12 +101,14 @@ func TestSecurityGroupCreate(t *testing.T) {
 	// We define a function so we can rebuild the tasks, because we modify in-place when running
 	buildTasks := func() map[string]fi.Task {
 		vpc1 := &VPC{
-			Name: s("vpc1"),
-			CIDR: s("172.20.0.0/16"),
-			Tags: map[string]string{"Name": "vpc1"},
+			Name:      s("vpc1"),
+			Lifecycle: fi.LifecycleSync,
+			CIDR:      s("172.20.0.0/16"),
+			Tags:      map[string]string{"Name": "vpc1"},
 		}
 		sg1 := &SecurityGroup{
 			Name:        s("sg1"),
+			Lifecycle:   fi.LifecycleSync,
 			Description: s("Description"),
 			VPC:         vpc1,
 			Tags:        map[string]string{"Name": "sg1"},

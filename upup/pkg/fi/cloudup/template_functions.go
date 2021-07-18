@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -96,6 +97,9 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretS
 
 	dest["GetInstanceGroup"] = tf.GetInstanceGroup
 	dest["GetNodeInstanceGroups"] = tf.GetNodeInstanceGroups
+	dest["HasHighlyAvailableControlPlane"] = tf.HasHighlyAvailableControlPlane
+	dest["ControlPlaneControllerReplicas"] = tf.ControlPlaneControllerReplicas
+
 	dest["CloudTags"] = tf.CloudTagsForInstanceGroup
 	dest["KubeDNS"] = func() *kops.KubeDNSConfig {
 		return cluster.Spec.KubeDNS
@@ -145,6 +149,19 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretS
 		}
 	}
 
+	if cluster.Spec.Networking != nil && cluster.Spec.Networking.AmazonVPC != nil {
+		c := cluster.Spec.Networking.AmazonVPC
+		dest["AmazonVpcEnvVars"] = func() map[string]string {
+			envVars := map[string]string{
+				"AWS_VPC_K8S_CNI_CONFIGURE_RPFILTER": "false",
+			}
+			for _, e := range c.Env {
+				envVars[e.Name] = e.Value
+			}
+			return envVars
+		}
+	}
+
 	if cluster.Spec.Networking != nil && cluster.Spec.Networking.Calico != nil {
 		c := cluster.Spec.Networking.Calico
 		dest["CalicoIPv4PoolIPIPMode"] = func() string {
@@ -154,19 +171,16 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretS
 			if c.IPIPMode != "" {
 				return c.IPIPMode
 			}
-			if c.CrossSubnet {
-				return "CrossSubnet"
-			}
-			return "Always"
+			return "CrossSubnet"
 		}
 		dest["CalicoIPv4PoolVXLANMode"] = func() string {
 			if c.EncapsulationMode != "vxlan" {
 				return "Never"
 			}
-			if c.CrossSubnet {
-				return "CrossSubnet"
+			if c.VXLANMode != "" {
+				return c.VXLANMode
 			}
-			return "Always"
+			return "CrossSubnet"
 		}
 	}
 
@@ -207,15 +221,34 @@ func (tf *TemplateFunctions) AddTo(dest template.FuncMap, secretStore fi.SecretS
 		dest["WeaveSecret"] = func() string { return weavesecretString }
 	}
 
-	dest["CsiExtraTags"] = func() string {
-		s := fmt.Sprintf("KubernetesCluster=%s", cluster.ObjectMeta.Name)
-		for n, v := range cluster.Spec.CloudLabels {
-			s += fmt.Sprintf(",%s=%s", n, v)
+	dest["CloudLabels"] = func() string {
+		labels := []string{
+			fmt.Sprintf("KubernetesCluster=%s", cluster.ObjectMeta.Name),
 		}
-		return s
+		for n, v := range cluster.Spec.CloudLabels {
+			labels = append(labels, fmt.Sprintf("%s=%s", n, v))
+		}
+		// ensure stable sorting of tags
+		sort.Strings(labels)
+		return strings.Join(labels, ",")
 	}
 
+	dest["IsIPv6Only"] = tf.IsIPv6Only
 	dest["UseServiceAccountIAM"] = tf.UseServiceAccountIAM
+
+	if cluster.Spec.NodeTerminationHandler != nil {
+		dest["DefaultQueueName"] = func() string {
+			s := strings.Replace(tf.ClusterName(), ".", "-", -1)
+			domain := ".amazonaws.com/"
+			if strings.Contains(tf.Region, "cn-") {
+				domain = ".amazonaws.com.cn/"
+			}
+			url := "https://sqs." + tf.Region + domain + tf.AWSAccountID + "/" + s + "-nth"
+			return url
+		}
+
+		dest["EnableSQSTerminationDraining"] = func() bool { return *cluster.Spec.NodeTerminationHandler.EnableSQSTerminationDraining }
+	}
 
 	return nil
 }
@@ -251,6 +284,29 @@ func (tf *TemplateFunctions) GetInstanceGroup(name string) (*kops.InstanceGroup,
 		return nil, fmt.Errorf("InstanceGroup %q not found", name)
 	}
 	return ig, nil
+}
+
+// ControlPlaneControllerReplicas returns the amount of replicas for a controllers that should run in the cluster
+// If the cluster has a highly available control plane, this function will return 2, if it has 1 control plane node, it will return 1
+func (tf *TemplateFunctions) ControlPlaneControllerReplicas() int {
+	if tf.HasHighlyAvailableControlPlane() {
+		return 2
+	}
+	return 1
+}
+
+// HasHighlyAvailableControlPlane returns true of the cluster has more than one control plane node. False otherwise.
+func (tf *TemplateFunctions) HasHighlyAvailableControlPlane() bool {
+	cp := 0
+	for _, ig := range tf.InstanceGroups {
+		if ig.Spec.Role == kops.InstanceGroupRoleMaster {
+			cp++
+			if cp > 1 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CloudControllerConfigArgv returns the args to external cloud controller

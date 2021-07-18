@@ -83,6 +83,11 @@ func ListResourcesAWS(cloud awsup.AWSCloud, clusterName string) (map[string]*res
 		ListIAMInstanceProfiles,
 		ListIAMRoles,
 		ListIAMOIDCProviders,
+
+		// SQS
+		ListSQSQueues,
+		// EventBridge
+		ListEventBridgeRules,
 	}
 
 	if featureflag.Spotinst.Enabled() {
@@ -239,32 +244,6 @@ func addUntaggedRouteTables(cloud awsup.AWSCloud, clusterName string, resources 
 	}
 
 	return nil
-}
-
-// FindAutoscalingLaunchConfiguration finds an AWS launch configuration given its name
-func FindAutoscalingLaunchConfiguration(cloud awsup.AWSCloud, name string) (*autoscaling.LaunchConfiguration, error) {
-	klog.V(2).Infof("Retrieving Autoscaling LaunchConfigurations %q", name)
-
-	var results []*autoscaling.LaunchConfiguration
-
-	request := &autoscaling.DescribeLaunchConfigurationsInput{
-		LaunchConfigurationNames: []*string{&name},
-	}
-	err := cloud.Autoscaling().DescribeLaunchConfigurationsPages(request, func(p *autoscaling.DescribeLaunchConfigurationsOutput, lastPage bool) bool {
-		results = append(results, p.LaunchConfigurations...)
-		return true
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error listing autoscaling LaunchConfigurations: %v", err)
-	}
-
-	if len(results) == 0 {
-		return nil, nil
-	}
-	if len(results) != 1 {
-		return nil, fmt.Errorf("found multiple LaunchConfigurations with name %q", name)
-	}
-	return results[0], nil
 }
 
 func matchesElbTags(tags map[string]string, actual []*elb.Tag) bool {
@@ -1796,7 +1775,7 @@ func ListRoute53Records(cloud fi.Cloud, clusterName string) ([]*resources.Resour
 		}
 		err := c.Route53().ListResourceRecordSetsPages(request, func(p *route53.ListResourceRecordSetsOutput, lastPage bool) bool {
 			for _, rrs := range p.ResourceRecordSets {
-				if aws.StringValue(rrs.Type) != "A" {
+				if aws.StringValue(rrs.Type) != "A" && aws.StringValue(rrs.Type) != "AAAA" {
 					continue
 				}
 
@@ -1822,7 +1801,7 @@ func ListRoute53Records(cloud fi.Cloud, clusterName string) ([]*resources.Resour
 
 				resourceTracker := &resources.Resource{
 					Name:     aws.StringValue(rrs.Name),
-					ID:       hostedZoneID + "/" + aws.StringValue(rrs.Name),
+					ID:       hostedZoneID + "/" + aws.StringValue(rrs.Type) + "/" + aws.StringValue(rrs.Name),
 					Type:     "route53-record",
 					GroupKey: hostedZoneID,
 					GroupDeleter: func(cloud fi.Cloud, resourceTrackers []*resources.Resource) error {
@@ -1904,7 +1883,7 @@ func DeleteIAMRole(cloud fi.Cloud, r *resources.Resource) error {
 
 	// Detach Managed Policies
 	for _, policy := range attachedPolicies {
-		klog.V(2).Infof("Deleting IAM role policy %q %q", roleName, policy)
+		klog.V(2).Infof("Detaching IAM role policy %q %q", roleName, policy)
 		request := &iam.DetachRolePolicyInput{
 			RoleName:  aws.String(r.Name),
 			PolicyArn: policy.PolicyArn,
@@ -1933,40 +1912,45 @@ func DeleteIAMRole(cloud fi.Cloud, r *resources.Resource) error {
 func ListIAMRoles(cloud fi.Cloud, clusterName string) ([]*resources.Resource, error) {
 	c := cloud.(awsup.AWSCloud)
 
-	remove := make(map[string]bool)
-	remove["masters."+clusterName] = true
-	remove["nodes."+clusterName] = true
-	remove["bastions."+clusterName] = true
-
-	var roles []*iam.Role
-	// Find roles matching remove map
+	var resourceTrackers []*resources.Resource
+	// Find roles owned by the cluster
 	{
+		var getRoleErr error
+		ownershipTag := "kubernetes.io/cluster/" + clusterName
 		request := &iam.ListRolesInput{}
 		err := c.IAM().ListRolesPages(request, func(p *iam.ListRolesOutput, lastPage bool) bool {
 			for _, r := range p.Roles {
 				name := aws.StringValue(r.RoleName)
-				if remove[name] {
-					roles = append(roles, r)
+				if !strings.HasSuffix(name, "."+clusterName) {
+					continue
+				}
+
+				getRequest := &iam.GetRoleInput{RoleName: r.RoleName}
+				roleOutput, err := c.IAM().GetRole(getRequest)
+				if err != nil {
+					getRoleErr = fmt.Errorf("calling IAM GetRole on %s: %w", name, err)
+					return false
+				}
+				for _, tag := range roleOutput.Role.Tags {
+					if fi.StringValue(tag.Key) == ownershipTag && fi.StringValue(tag.Value) == "owned" {
+						resourceTracker := &resources.Resource{
+							Name:    name,
+							ID:      name,
+							Type:    "iam-role",
+							Deleter: DeleteIAMRole,
+						}
+						resourceTrackers = append(resourceTrackers, resourceTracker)
+					}
 				}
 			}
 			return true
 		})
+		if getRoleErr != nil {
+			return nil, getRoleErr
+		}
 		if err != nil {
 			return nil, fmt.Errorf("error listing IAM roles: %v", err)
 		}
-	}
-
-	var resourceTrackers []*resources.Resource
-
-	for _, role := range roles {
-		name := aws.StringValue(role.RoleName)
-		resourceTracker := &resources.Resource{
-			Name:    name,
-			ID:      name,
-			Type:    "iam-role",
-			Deleter: DeleteIAMRole,
-		}
-		resourceTrackers = append(resourceTrackers, resourceTracker)
 	}
 
 	return resourceTrackers, nil
@@ -2011,23 +1995,35 @@ func DeleteIAMInstanceProfile(cloud fi.Cloud, r *resources.Resource) error {
 func ListIAMInstanceProfiles(cloud fi.Cloud, clusterName string) ([]*resources.Resource, error) {
 	c := cloud.(awsup.AWSCloud)
 
-	remove := make(map[string]bool)
-	remove["masters."+clusterName] = true
-	remove["nodes."+clusterName] = true
-	remove["bastions."+clusterName] = true
-
+	var getProfileErr error
 	var profiles []*iam.InstanceProfile
+	ownershipTag := "kubernetes.io/cluster/" + clusterName
 
 	request := &iam.ListInstanceProfilesInput{}
 	err := c.IAM().ListInstanceProfilesPages(request, func(p *iam.ListInstanceProfilesOutput, lastPage bool) bool {
 		for _, p := range p.InstanceProfiles {
 			name := aws.StringValue(p.InstanceProfileName)
-			if remove[name] {
-				profiles = append(profiles, p)
+			if !strings.HasSuffix(name, "."+clusterName) {
+				continue
+			}
+
+			getRequest := &iam.GetInstanceProfileInput{InstanceProfileName: p.InstanceProfileName}
+			profileOutput, err := c.IAM().GetInstanceProfile(getRequest)
+			if err != nil {
+				getProfileErr = fmt.Errorf("calling IAM GetInstanceProfile on %s: %w", name, err)
+				return false
+			}
+			for _, tag := range profileOutput.InstanceProfile.Tags {
+				if fi.StringValue(tag.Key) == ownershipTag && fi.StringValue(tag.Value) == "owned" {
+					profiles = append(profiles, p)
+				}
 			}
 		}
 		return true
 	})
+	if getProfileErr != nil {
+		return nil, getProfileErr
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error listing IAM instance profiles: %v", err)
 	}

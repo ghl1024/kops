@@ -52,8 +52,6 @@ var (
 	CacheNodeidentityInfo = New("CacheNodeidentityInfo", Bool(false))
 	// DNSPreCreate controls whether we pre-create DNS records.
 	DNSPreCreate = New("DNSPreCreate", Bool(true))
-	//EnableExternalCloudController toggles the use of cloud-controller-manager introduced in v1.7
-	EnableExternalCloudController = New("EnableExternalCloudController", Bool(false))
 	// EnableExternalDNS enables external DNS
 	EnableExternalDNS = New("EnableExternalDNS", Bool(false))
 	// EnableSeparateConfigBase allows a config-base that is different from the state store
@@ -87,20 +85,22 @@ var (
 	SkipEtcdVersionCheck = New("SkipEtcdVersionCheck", Bool(false))
 	// TerraformJSON outputs terraform in JSON instead of hcl output. JSON output can be also parsed by terraform 0.12
 	TerraformJSON = New("TerraformJSON", Bool(false))
-	// LegacyIAM will permit use of legacy IAM permissions.
-	LegacyIAM = New("LegacyIAM", Bool(false))
 	// ClusterAddons activates experimental cluster-addons support
 	ClusterAddons = New("ClusterAddons", Bool(false))
-	// UseServiceAccountIAM controls whether we use pod-level IAM permissions for our system pods.
+	// UseServiceAccountIAM controls whether we use pod-level IAM permissions for our system pods and kOps addons.
 	UseServiceAccountIAM = New("UseServiceAccountIAM", Bool(false))
-	// PublicJWKS enables public jwks access.  This is generally not as secure as republishing.
-	PublicJWKS = New("PublicJWKS", Bool(false))
 	// Azure toggles the Azure support.
 	Azure = New("Azure", Bool(false))
 	// KopsControllerStateStore enables fetching the kops state from kops-controller, instead of requiring access to S3/GCS/etc.
 	KopsControllerStateStore = New("KopsControllerStateStore", Bool(false))
-	// APIServerNodes enables ability to provision nodes that only run the kube-apiserver
+	// APIServerNodes enables ability to provision nodes that only run the kube-apiserver.
 	APIServerNodes = New("APIServerNodes", Bool(false))
+	// UseAddonOperators activates experimental addon operator support
+	UseAddonOperators = New("UseAddonOperators", Bool(false))
+	// AWSIPv6 activates experimental AWS IPv6 support.
+	AWSIPv6 = New("AWSIPv6", Bool(false))
+	// TerraformManagedFiles enables rendering managed files into the Terraform configuration.
+	TerraformManagedFiles = New("TerraformManagedFiles", Bool(true))
 )
 
 // FeatureFlag defines a feature flag

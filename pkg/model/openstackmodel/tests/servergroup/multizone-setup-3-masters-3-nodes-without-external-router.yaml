@@ -1,13 +1,19 @@
+Lifecycle: ""
 Name: master-a
 ---
+Lifecycle: ""
 Name: master-b
 ---
+Lifecycle: ""
 Name: master-c
 ---
+Lifecycle: ""
 Name: node-a
 ---
+Lifecycle: ""
 Name: node-b
 ---
+Lifecycle: ""
 Name: node-c
 ---
 AvailabilityZone: zone-1
@@ -17,7 +23,7 @@ ForAPIServer: false
 GroupName: master-a
 ID: null
 Image: image
-Lifecycle: null
+Lifecycle: Sync
 Metadata:
   KopsInstanceGroup: master-a
   KopsName: master-a-1-cluster
@@ -43,19 +49,19 @@ Port:
   Network:
     AvailabilityZoneHints: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: cluster
     Tag: null
   SecurityGroups:
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: masters.cluster
     RemoveExtraRules: null
     RemoveGroup: false
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: master-public-name
     RemoveExtraRules: null
     RemoveGroup: false
@@ -63,7 +69,7 @@ Port:
   - CIDR: null
     DNSServers: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: subnet-a.cluster
     Network: null
     Tag: null
@@ -83,6 +89,7 @@ ServerGroup:
   - anti-affinity
 UserData:
   task:
+    Lifecycle: ""
     Name: master-a
 ---
 AvailabilityZone: zone-2
@@ -92,7 +99,7 @@ ForAPIServer: false
 GroupName: master-b
 ID: null
 Image: image
-Lifecycle: null
+Lifecycle: Sync
 Metadata:
   KopsInstanceGroup: master-b
   KopsName: master-b-1-cluster
@@ -118,19 +125,19 @@ Port:
   Network:
     AvailabilityZoneHints: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: cluster
     Tag: null
   SecurityGroups:
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: masters.cluster
     RemoveExtraRules: null
     RemoveGroup: false
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: master-public-name
     RemoveExtraRules: null
     RemoveGroup: false
@@ -138,7 +145,7 @@ Port:
   - CIDR: null
     DNSServers: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: subnet-b.cluster
     Network: null
     Tag: null
@@ -158,6 +165,7 @@ ServerGroup:
   - anti-affinity
 UserData:
   task:
+    Lifecycle: ""
     Name: master-b
 ---
 AvailabilityZone: zone-3
@@ -167,7 +175,7 @@ ForAPIServer: false
 GroupName: master-c
 ID: null
 Image: image
-Lifecycle: null
+Lifecycle: Sync
 Metadata:
   KopsInstanceGroup: master-c
   KopsName: master-c-1-cluster
@@ -193,19 +201,19 @@ Port:
   Network:
     AvailabilityZoneHints: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: cluster
     Tag: null
   SecurityGroups:
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: masters.cluster
     RemoveExtraRules: null
     RemoveGroup: false
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: master-public-name
     RemoveExtraRules: null
     RemoveGroup: false
@@ -213,7 +221,7 @@ Port:
   - CIDR: null
     DNSServers: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: subnet-c.cluster
     Network: null
     Tag: null
@@ -233,6 +241,7 @@ ServerGroup:
   - anti-affinity
 UserData:
   task:
+    Lifecycle: ""
     Name: master-c
 ---
 AvailabilityZone: zone-1
@@ -242,7 +251,7 @@ ForAPIServer: false
 GroupName: node-a
 ID: null
 Image: image
-Lifecycle: null
+Lifecycle: Sync
 Metadata:
   KopsInstanceGroup: node-a
   KopsName: node-a-1-cluster
@@ -265,13 +274,13 @@ Port:
   Network:
     AvailabilityZoneHints: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: cluster
     Tag: null
   SecurityGroups:
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: nodes.cluster
     RemoveExtraRules: null
     RemoveGroup: false
@@ -279,7 +288,7 @@ Port:
   - CIDR: null
     DNSServers: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: subnet-a.cluster
     Network: null
     Tag: null
@@ -299,6 +308,7 @@ ServerGroup:
   - anti-affinity
 UserData:
   task:
+    Lifecycle: ""
     Name: node-a
 ---
 AvailabilityZone: zone-2
@@ -308,7 +318,7 @@ ForAPIServer: false
 GroupName: node-b
 ID: null
 Image: image
-Lifecycle: null
+Lifecycle: Sync
 Metadata:
   KopsInstanceGroup: node-b
   KopsName: node-b-1-cluster
@@ -331,13 +341,13 @@ Port:
   Network:
     AvailabilityZoneHints: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: cluster
     Tag: null
   SecurityGroups:
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: nodes.cluster
     RemoveExtraRules: null
     RemoveGroup: false
@@ -345,7 +355,7 @@ Port:
   - CIDR: null
     DNSServers: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: subnet-b.cluster
     Network: null
     Tag: null
@@ -365,6 +375,7 @@ ServerGroup:
   - anti-affinity
 UserData:
   task:
+    Lifecycle: ""
     Name: node-b
 ---
 AvailabilityZone: zone-3
@@ -374,7 +385,7 @@ ForAPIServer: false
 GroupName: node-c
 ID: null
 Image: image
-Lifecycle: null
+Lifecycle: Sync
 Metadata:
   KopsInstanceGroup: node-c
   KopsName: node-c-1-cluster
@@ -397,13 +408,13 @@ Port:
   Network:
     AvailabilityZoneHints: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: cluster
     Tag: null
   SecurityGroups:
   - Description: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: nodes.cluster
     RemoveExtraRules: null
     RemoveGroup: false
@@ -411,7 +422,7 @@ Port:
   - CIDR: null
     DNSServers: null
     ID: null
-    Lifecycle: null
+    Lifecycle: ""
     Name: subnet-c.cluster
     Network: null
     Tag: null
@@ -431,15 +442,132 @@ ServerGroup:
   - anti-affinity
 UserData:
   task:
+    Lifecycle: ""
     Name: node-c
 ---
-Lifecycle: null
-Name: ca
+Lifecycle: ""
+Name: apiserver-aggregator-ca
+Signer: null
+alternateNames: null
+oldFormat: false
+subject: cn=apiserver-aggregator-ca
+type: ca
+---
+Lifecycle: ""
+Name: etcd-clients-ca
+Signer: null
+alternateNames: null
+oldFormat: false
+subject: cn=etcd-clients-ca
+type: ca
+---
+Lifecycle: ""
+Name: etcd-manager-ca-events
+Signer: null
+alternateNames: null
+oldFormat: false
+subject: cn=etcd-manager-ca-events
+type: ca
+---
+Lifecycle: ""
+Name: etcd-manager-ca-main
+Signer: null
+alternateNames: null
+oldFormat: false
+subject: cn=etcd-manager-ca-main
+type: ca
+---
+Lifecycle: ""
+Name: etcd-peers-ca-events
+Signer: null
+alternateNames: null
+oldFormat: false
+subject: cn=etcd-peers-ca-events
+type: ca
+---
+Lifecycle: ""
+Name: etcd-peers-ca-main
+Signer: null
+alternateNames: null
+oldFormat: false
+subject: cn=etcd-peers-ca-main
+type: ca
+---
+Lifecycle: ""
+Name: kubernetes-ca
 Signer: null
 alternateNames: null
 oldFormat: false
 subject: cn=kubernetes
 type: ca
+---
+Lifecycle: ""
+Name: service-account
+Signer: null
+alternateNames: null
+oldFormat: false
+subject: cn=service-account
+type: ca
+---
+Base: null
+Contents:
+  task:
+    Lifecycle: ""
+    Name: master-a
+Lifecycle: ""
+Location: igconfig/master/master-a/nodeupconfig.yaml
+Name: nodeupconfig-master-a
+Public: null
+---
+Base: null
+Contents:
+  task:
+    Lifecycle: ""
+    Name: master-b
+Lifecycle: ""
+Location: igconfig/master/master-b/nodeupconfig.yaml
+Name: nodeupconfig-master-b
+Public: null
+---
+Base: null
+Contents:
+  task:
+    Lifecycle: ""
+    Name: master-c
+Lifecycle: ""
+Location: igconfig/master/master-c/nodeupconfig.yaml
+Name: nodeupconfig-master-c
+Public: null
+---
+Base: null
+Contents:
+  task:
+    Lifecycle: ""
+    Name: node-a
+Lifecycle: ""
+Location: igconfig/node/node-a/nodeupconfig.yaml
+Name: nodeupconfig-node-a
+Public: null
+---
+Base: null
+Contents:
+  task:
+    Lifecycle: ""
+    Name: node-b
+Lifecycle: ""
+Location: igconfig/node/node-b/nodeupconfig.yaml
+Name: nodeupconfig-node-b
+Public: null
+---
+Base: null
+Contents:
+  task:
+    Lifecycle: ""
+    Name: node-c
+Lifecycle: ""
+Location: igconfig/node/node-c/nodeupconfig.yaml
+Name: nodeupconfig-node-c
+Public: null
 ---
 AdditionalSecurityGroups: null
 ID: null
@@ -448,19 +576,19 @@ Name: port-master-a-1-cluster
 Network:
   AvailabilityZoneHints: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: cluster
   Tag: null
 SecurityGroups:
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: masters.cluster
   RemoveExtraRules: null
   RemoveGroup: false
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: master-public-name
   RemoveExtraRules: null
   RemoveGroup: false
@@ -468,7 +596,7 @@ Subnets:
 - CIDR: null
   DNSServers: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: subnet-a.cluster
   Network: null
   Tag: null
@@ -481,19 +609,19 @@ Name: port-master-b-1-cluster
 Network:
   AvailabilityZoneHints: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: cluster
   Tag: null
 SecurityGroups:
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: masters.cluster
   RemoveExtraRules: null
   RemoveGroup: false
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: master-public-name
   RemoveExtraRules: null
   RemoveGroup: false
@@ -501,7 +629,7 @@ Subnets:
 - CIDR: null
   DNSServers: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: subnet-b.cluster
   Network: null
   Tag: null
@@ -514,19 +642,19 @@ Name: port-master-c-1-cluster
 Network:
   AvailabilityZoneHints: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: cluster
   Tag: null
 SecurityGroups:
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: masters.cluster
   RemoveExtraRules: null
   RemoveGroup: false
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: master-public-name
   RemoveExtraRules: null
   RemoveGroup: false
@@ -534,7 +662,7 @@ Subnets:
 - CIDR: null
   DNSServers: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: subnet-c.cluster
   Network: null
   Tag: null
@@ -547,13 +675,13 @@ Name: port-node-a-1-cluster
 Network:
   AvailabilityZoneHints: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: cluster
   Tag: null
 SecurityGroups:
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: nodes.cluster
   RemoveExtraRules: null
   RemoveGroup: false
@@ -561,7 +689,7 @@ Subnets:
 - CIDR: null
   DNSServers: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: subnet-a.cluster
   Network: null
   Tag: null
@@ -574,13 +702,13 @@ Name: port-node-b-1-cluster
 Network:
   AvailabilityZoneHints: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: cluster
   Tag: null
 SecurityGroups:
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: nodes.cluster
   RemoveExtraRules: null
   RemoveGroup: false
@@ -588,7 +716,7 @@ Subnets:
 - CIDR: null
   DNSServers: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: subnet-b.cluster
   Network: null
   Tag: null
@@ -601,13 +729,13 @@ Name: port-node-c-1-cluster
 Network:
   AvailabilityZoneHints: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: cluster
   Tag: null
 SecurityGroups:
 - Description: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: nodes.cluster
   RemoveExtraRules: null
   RemoveGroup: false
@@ -615,7 +743,7 @@ Subnets:
 - CIDR: null
   DNSServers: null
   ID: null
-  Lifecycle: null
+  Lifecycle: ""
   Name: subnet-c.cluster
   Network: null
   Tag: null

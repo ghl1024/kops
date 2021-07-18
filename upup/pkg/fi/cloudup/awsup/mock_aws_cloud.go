@@ -24,10 +24,14 @@ import (
 	"github.com/aws/aws-sdk-go/service/cloudformation"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
+	"github.com/aws/aws-sdk-go/service/elb"
 	"github.com/aws/aws-sdk-go/service/elb/elbiface"
+	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/aws/aws-sdk-go/service/elbv2/elbv2iface"
+	"github.com/aws/aws-sdk-go/service/eventbridge/eventbridgeiface"
 	"github.com/aws/aws-sdk-go/service/iam/iamiface"
 	"github.com/aws/aws-sdk-go/service/route53/route53iface"
+	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
@@ -80,6 +84,8 @@ type MockCloud struct {
 	MockELB            elbiface.ELBAPI
 	MockELBV2          elbv2iface.ELBV2API
 	MockSpotinst       spotinst.Cloud
+	MockSQS            sqsiface.SQSAPI
+	MockEventBridge    eventbridgeiface.EventBridgeAPI
 }
 
 func (c *MockAWSCloud) DeleteGroup(g *cloudinstances.CloudInstanceGroup) error {
@@ -186,6 +192,22 @@ func (c *MockAWSCloud) RemoveELBV2Tags(ResourceArn string, tags map[string]strin
 	return removeELBV2Tags(c, ResourceArn, tags)
 }
 
+func (c *MockAWSCloud) FindELBByNameTag(findNameTag string) (*elb.LoadBalancerDescription, error) {
+	return findELBByNameTag(c, findNameTag)
+}
+
+func (c *MockAWSCloud) DescribeELBTags(loadBalancerNames []string) (map[string][]*elb.Tag, error) {
+	return describeELBTags(c, loadBalancerNames)
+}
+
+func (c *MockAWSCloud) FindELBV2ByNameTag(findNameTag string) (*elbv2.LoadBalancer, error) {
+	return findELBV2ByNameTag(c, findNameTag)
+}
+
+func (c *MockAWSCloud) DescribeELBV2Tags(loadBalancerArns []string) (map[string][]*elbv2.Tag, error) {
+	return describeELBV2Tags(c, loadBalancerArns)
+}
+
 func (c *MockAWSCloud) DescribeInstance(instanceID string) (*ec2.Instance, error) {
 	return nil, fmt.Errorf("MockAWSCloud DescribeInstance not implemented")
 }
@@ -261,8 +283,26 @@ func (c *MockAWSCloud) Spotinst() spotinst.Cloud {
 	return c.MockSpotinst
 }
 
+func (c *MockAWSCloud) SQS() sqsiface.SQSAPI {
+	if c.MockSQS == nil {
+		klog.Fatalf("MockSQS not set")
+	}
+	return c.MockSQS
+}
+
+func (c *MockAWSCloud) EventBridge() eventbridgeiface.EventBridgeAPI {
+	if c.MockEventBridge == nil {
+		klog.Fatalf("MockEventBridgess not set")
+	}
+	return c.MockEventBridge
+}
+
 func (c *MockAWSCloud) FindVPCInfo(id string) (*fi.VPCInfo, error) {
 	return findVPCInfo(c, id)
+}
+
+func (c *MockAWSCloud) GetApiIngressStatus(cluster *kops.Cluster) ([]fi.ApiIngressStatus, error) {
+	return getApiIngressStatus(c, cluster)
 }
 
 // DefaultInstanceType determines an instance type for the specified cluster & instance group
@@ -308,16 +348,23 @@ func (c *MockAWSCloud) DescribeInstanceType(instanceType string) (*ec2.InstanceT
 	}
 
 	switch instanceType {
-	case "c5.large", "m3.medium", "m4.large", "m5.large", "m5.xlarge", "t2.micro", "t2.medium", "t3.medium", "t3.large", "c4.large":
+	case "c5.large", "m3.medium", "m4.large", "m5.large", "m5.xlarge", "t3.micro", "t3.medium", "t3.large", "c4.large":
 		info.ProcessorInfo = &ec2.ProcessorInfo{
 			SupportedArchitectures: []*string{
-				aws.String("x86_64"),
+				aws.String(ec2.ArchitectureTypeX8664),
 			},
 		}
 	case "a1.large":
 		info.ProcessorInfo = &ec2.ProcessorInfo{
 			SupportedArchitectures: []*string{
-				aws.String("arm64"),
+				aws.String(ec2.ArchitectureTypeArm64),
+			},
+		}
+	case "t2.micro", "t2.medium":
+		info.ProcessorInfo = &ec2.ProcessorInfo{
+			SupportedArchitectures: []*string{
+				aws.String(ec2.ArchitectureTypeI386),
+				aws.String(ec2.ArchitectureTypeX8664),
 			},
 		}
 	}

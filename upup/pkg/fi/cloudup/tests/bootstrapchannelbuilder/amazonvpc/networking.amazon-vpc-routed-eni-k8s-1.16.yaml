@@ -4,7 +4,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: networking.amazon-vpc-routed-eni
-    addon.kops.k8s.io/version: 1.7.8-kops.1
     app.kubernetes.io/managed-by: kops
     role.kubernetes.io/networking: "1"
   name: aws-node
@@ -25,7 +24,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: networking.amazon-vpc-routed-eni
-    addon.kops.k8s.io/version: 1.7.8-kops.1
     app.kubernetes.io/managed-by: kops
     role.kubernetes.io/networking: "1"
   name: aws-node
@@ -73,7 +71,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: networking.amazon-vpc-routed-eni
-    addon.kops.k8s.io/version: 1.7.8-kops.1
     app.kubernetes.io/managed-by: kops
     role.kubernetes.io/networking: "1"
   name: eniconfigs.crd.k8s.amazonaws.com
@@ -97,7 +94,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: networking.amazon-vpc-routed-eni
-    addon.kops.k8s.io/version: 1.7.8-kops.1
     app.kubernetes.io/managed-by: kops
     k8s-app: aws-node
     role.kubernetes.io/networking: "1"
@@ -132,49 +128,19 @@ spec:
                 - fargate
       containers:
       - env:
-        - name: ADDITIONAL_ENI_TAGS
-          value: '{}'
-        - name: AWS_VPC_CNI_NODE_PORT_SUPPORT
-          value: "true"
-        - name: AWS_VPC_ENI_MTU
-          value: "9001"
         - name: AWS_VPC_K8S_CNI_CONFIGURE_RPFILTER
           value: "false"
-        - name: AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG
-          value: "false"
-        - name: AWS_VPC_K8S_CNI_EXTERNALSNAT
-          value: "false"
         - name: AWS_VPC_K8S_CNI_LOGLEVEL
-          value: DEBUG
-        - name: AWS_VPC_K8S_CNI_LOG_FILE
-          value: /host/var/log/aws-routed-eni/ipamd.log
-        - name: AWS_VPC_K8S_CNI_RANDOMIZESNAT
-          value: prng
-        - name: AWS_VPC_K8S_CNI_VETHPREFIX
-          value: eni
-        - name: AWS_VPC_K8S_PLUGIN_LOG_FILE
-          value: /var/log/aws-routed-eni/plugin.log
-        - name: AWS_VPC_K8S_PLUGIN_LOG_LEVEL
-          value: DEBUG
-        - name: DISABLE_INTROSPECTION
-          value: "false"
-        - name: DISABLE_METRICS
-          value: "false"
-        - name: ENABLE_POD_ENI
-          value: "false"
+          value: debug
+        - name: WARM_IP_TARGET
+          value: "10"
         - name: MY_NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        - name: WARM_ENI_TARGET
-          value: "1"
         - name: CLUSTER_NAME
           value: minimal.example.com
-        - name: WARM_IP_TARGET
-          value: "10"
-        - name: AWS_VPC_K8S_CNI_LOGLEVEL
-          value: debug
-        image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon-k8s-cni:v1.7.10
+        image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon-k8s-cni:v1.8.0
         imagePullPolicy: Always
         livenessProbe:
           exec:
@@ -217,7 +183,7 @@ spec:
       - env:
         - name: DISABLE_TCP_EARLY_DEMUX
           value: "false"
-        image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon-k8s-cni-init:v1.7.10
+        image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/amazon-k8s-cni-init:v1.8.0
         imagePullPolicy: Always
         name: aws-vpc-cni-init
         securityContext:
@@ -238,7 +204,7 @@ spec:
           path: /etc/cni/net.d
         name: cni-net-dir
       - hostPath:
-          path: /var/run/dockershim.sock
+          path: /run/containerd/containerd.sock
         name: dockershim
       - hostPath:
           path: /run/xtables.lock
@@ -252,9 +218,7 @@ spec:
           type: DirectoryOrCreate
         name: run-dir
   updateStrategy:
-    rollingUpdate:
-      maxUnavailable: 10%
-    type: RollingUpdate
+    type: OnDelete
 
 ---
 
@@ -264,7 +228,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: networking.amazon-vpc-routed-eni
-    addon.kops.k8s.io/version: 1.7.8-kops.1
     app.kubernetes.io/managed-by: kops
     role.kubernetes.io/networking: "1"
   name: aws-node

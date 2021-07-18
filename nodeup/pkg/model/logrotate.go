@@ -17,10 +17,9 @@ limitations under the License.
 package model
 
 import (
-	"fmt"
 	"strings"
 
-	"k8s.io/kops/pkg/apis/kops/util"
+	"k8s.io/kops/pkg/apis/kops/model"
 	"k8s.io/kops/pkg/systemd"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
@@ -49,11 +48,6 @@ func (b *LogrotateBuilder) Build(c *fi.ModelBuilderContext) error {
 		c.AddTask(&nodetasks.Package{Name: "logrotate"})
 	}
 
-	k8sVersion, err := util.ParseKubernetesVersion(b.Cluster.Spec.KubernetesVersion)
-	if err != nil || k8sVersion == nil {
-		return fmt.Errorf("unable to parse KubernetesVersion %q", b.Cluster.Spec.KubernetesVersion)
-	}
-
 	b.addLogRotate(c, "docker", "/var/log/docker.log", logRotateOptions{})
 	b.addLogRotate(c, "kube-addons", "/var/log/kube-addons.log", logRotateOptions{})
 	b.addLogRotate(c, "kube-apiserver", "/var/log/kube-apiserver.log", logRotateOptions{})
@@ -63,6 +57,9 @@ func (b *LogrotateBuilder) Build(c *fi.ModelBuilderContext) error {
 	b.addLogRotate(c, "kubelet", "/var/log/kubelet.log", logRotateOptions{})
 	b.addLogRotate(c, "etcd", "/var/log/etcd.log", logRotateOptions{})
 	b.addLogRotate(c, "etcd-events", "/var/log/etcd-events.log", logRotateOptions{})
+	if model.UseCiliumEtcd(b.Cluster) {
+		b.addLogRotate(c, "etcd-cilium", "/var/log/etcd-cilium.log", logRotateOptions{})
+	}
 
 	if err := b.addLogrotateService(c); err != nil {
 		return err

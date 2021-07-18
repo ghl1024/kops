@@ -37,18 +37,19 @@ kOps is Kubernetes Operations.
 
 ### SEE ALSO
 
-* [kops completion](kops_completion.md)	 - Output shell completion code for the given shell (bash or zsh).
+* [kops completion](kops_completion.md)	 - generate the autocompletion script for the specified shell
 * [kops create](kops_create.md)	 - Create a resource by command line, filename or stdin.
-* [kops delete](kops_delete.md)	 - Delete clusters,instancegroups, instances, or secrets.
+* [kops delete](kops_delete.md)	 - Delete clusters, instancegroups, instances, and secrets.
 * [kops describe](kops_describe.md)	 - Describe a resource.
+* [kops distrust](kops_distrust.md)	 - Distrust keypairs.
 * [kops edit](kops_edit.md)	 - Edit clusters and other resources.
 * [kops export](kops_export.md)	 - Export configuration.
 * [kops get](kops_get.md)	 - Get one or many resources.
-* [kops import](kops_import.md)	 - Import a cluster.
+* [kops promote](kops_promote.md)	 - Promote a resource.
 * [kops replace](kops_replace.md)	 - Replace cluster resources.
 * [kops rolling-update](kops_rolling-update.md)	 - Rolling update a cluster.
-* [kops set](kops_set.md)	 - Set fields on clusters and other resources.
-* [kops toolbox](kops_toolbox.md)	 - Misc infrequently used commands.
+* [kops toolbox](kops_toolbox.md)	 - Miscellaneous, infrequently used commands.
+* [kops trust](kops_trust.md)	 - Trust keypairs.
 * [kops update](kops_update.md)	 - Update a cluster.
 * [kops upgrade](kops_upgrade.md)	 - Upgrade a kubernetes cluster.
 * [kops validate](kops_validate.md)	 - Validate a kOps cluster.

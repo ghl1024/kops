@@ -17,12 +17,10 @@ limitations under the License.
 package awstasks
 
 import (
-	"encoding/base64"
-
-	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
+	"k8s.io/kops/upup/pkg/fi/cloudup/terraformWriter"
 )
 
 type terraformLaunchTemplateNetworkInterface struct {
@@ -30,8 +28,10 @@ type terraformLaunchTemplateNetworkInterface struct {
 	AssociatePublicIPAddress *bool `json:"associate_public_ip_address,omitempty" cty:"associate_public_ip_address"`
 	// DeleteOnTermination indicates whether the network interface should be destroyed on instance termination.
 	DeleteOnTermination *bool `json:"delete_on_termination,omitempty" cty:"delete_on_termination"`
+	// Ipv6AddressCount is the number of IPv6 addresses to assign with the primary network interface.
+	Ipv6AddressCount *int64 `json:"ipv6_address_count,omitempty" cty:"ipv6_address_count"`
 	// SecurityGroups is a list of security group ids.
-	SecurityGroups []*terraform.Literal `json:"security_groups,omitempty" cty:"security_groups"`
+	SecurityGroups []*terraformWriter.Literal `json:"security_groups,omitempty" cty:"security_groups"`
 }
 
 type terraformLaunchTemplateMonitoring struct {
@@ -56,7 +56,7 @@ type terraformLaunchTemplatePlacement struct {
 
 type terraformLaunchTemplateIAMProfile struct {
 	// Name is the name of the profile
-	Name *terraform.Literal `json:"name,omitempty" cty:"name"`
+	Name *terraformWriter.Literal `json:"name,omitempty" cty:"name"`
 }
 
 type terraformLaunchTemplateMarketOptionsSpotOptions struct {
@@ -144,7 +144,7 @@ type terraformLaunchTemplate struct {
 	// InstanceType is the type of instance
 	InstanceType *string `json:"instance_type,omitempty" cty:"instance_type"`
 	// KeyName is the ssh key to use
-	KeyName *terraform.Literal `json:"key_name,omitempty" cty:"key_name"`
+	KeyName *terraformWriter.Literal `json:"key_name,omitempty" cty:"key_name"`
 	// MarketOptions are the spot pricing options
 	MarketOptions []*terraformLaunchTemplateMarketOptions `json:"instance_market_options,omitempty" cty:"instance_market_options"`
 	// MetadataOptions are the instance metadata options.
@@ -160,17 +160,17 @@ type terraformLaunchTemplate struct {
 	// TagSpecifications are the tags to apply to a resource when it is created.
 	TagSpecifications []*terraformLaunchTemplateTagSpecification `json:"tag_specifications,omitempty" cty:"tag_specifications"`
 	// UserData is the user data for the instances
-	UserData *terraform.Literal `json:"user_data,omitempty" cty:"user_data"`
+	UserData *terraformWriter.Literal `json:"user_data,omitempty" cty:"user_data"`
 }
 
 // TerraformLink returns the terraform reference
-func (t *LaunchTemplate) TerraformLink() *terraform.Literal {
-	return terraform.LiteralProperty("aws_launch_template", fi.StringValue(t.Name), "id")
+func (t *LaunchTemplate) TerraformLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("aws_launch_template", fi.StringValue(t.Name), "id")
 }
 
 // VersionLink returns the terraform version reference
-func (t *LaunchTemplate) VersionLink() *terraform.Literal {
-	return terraform.LiteralProperty("aws_launch_template", fi.StringValue(t.Name), "latest_version")
+func (t *LaunchTemplate) VersionLink() *terraformWriter.Literal {
+	return terraformWriter.LiteralProperty("aws_launch_template", fi.StringValue(t.Name), "latest_version")
 }
 
 // RenderTerraform is responsible for rendering the terraform json
@@ -204,6 +204,7 @@ func (t *LaunchTemplate) RenderTerraform(target *terraform.TerraformTarget, a, e
 			{
 				AssociatePublicIPAddress: e.AssociatePublicIP,
 				DeleteOnTermination:      fi.Bool(true),
+				Ipv6AddressCount:         e.IPv6AddressCount,
 			},
 		},
 	}
@@ -253,22 +254,9 @@ func (t *LaunchTemplate) RenderTerraform(target *terraform.TerraformTarget, a, e
 			return err
 		}
 		if d != nil {
-			if featureflag.TerraformJSON.Enabled() {
-				b64d := base64.StdEncoding.EncodeToString(d)
-				if b64d != "" {
-					b64UserDataResource := fi.NewStringResource(b64d)
-					tf.UserData, err = target.AddFile("aws_launch_template", fi.StringValue(e.Name), "user_data", b64UserDataResource, false)
-					if err != nil {
-						return err
-					}
-				}
-			} else {
-				userDataResource := fi.NewBytesResource(d)
-
-				tf.UserData, err = target.AddFile("aws_launch_template", fi.StringValue(e.Name), "user_data", userDataResource, true)
-				if err != nil {
-					return err
-				}
+			tf.UserData, err = target.AddFileBytes("aws_launch_template", fi.StringValue(e.Name), "user_data", d, true)
+			if err != nil {
+				return err
 			}
 		}
 	}

@@ -35,7 +35,7 @@ const (
 	// containerd legacy packages URLs for v1.2.x and v1.3.x
 	containerdLegacyUrlAmd64 = "https://storage.googleapis.com/cri-containerd-release/cri-containerd-%s.linux-amd64.tar.gz"
 	// containerd version that is available for both AMD64 and ARM64, used in case the selected version is not available for ARM64
-	containerdFallbackVersion = "1.4.4"
+	containerdFallbackVersion = "1.4.6"
 )
 
 func findContainerdAsset(c *kops.Cluster, assetBuilder *assets.AssetBuilder, arch architectures.Architecture) (*url.URL, *hashing.Hash, error) {
@@ -184,6 +184,11 @@ func findAllContainerdHashesAmd64() map[string]string {
 		"1.4.2":  "9d0fd5f4d2bc58b345728432b7daac75fc99c1da91afa4f41e6103f618e74012",
 		"1.4.3":  "2697a342e3477c211ab48313e259fd7e32ad1f5ded19320e6a559f50a82bff3d",
 		"1.4.4":  "96641849cb78a0a119223a427dfdc1ade88412ef791a14193212c8c8e29d447b",
+		"1.4.5":  "f8155278fd256526ca9804219e1ee46f5db11c6ddf455086b04c0887c868822a",
+		"1.4.6":  "6ae4763598c9583f8b50605f19d6c7e9ef93c216706465e73dfc84ee6b63a238",
+		"1.5.0":  "aee7b553ab88842fdafe43955757abe746b8e9995b2be55c603f0a236186ff9b",
+		"1.5.1":  "2fd97916b24396c13849cfcd89805170e1ef0265a2f7fce8e74ae044a6a6a169",
+		"1.5.2":  "e7adbb6c6f6e67639460579a8aa991e9ce4de2062ed36d3261e6e4865574d947",
 	}
 
 	return hashes
@@ -195,6 +200,7 @@ func findAllContainerdDockerMappings() map[string]string {
 		"1.3.9": "19.03.14",
 		"1.4.3": "20.10.0",
 		"1.4.4": "20.10.6",
+		"1.4.6": "20.10.7",
 	}
 
 	return versions

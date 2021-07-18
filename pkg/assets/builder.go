@@ -39,11 +39,10 @@ import (
 
 // AssetBuilder discovers and remaps assets.
 type AssetBuilder struct {
-	ContainerAssets []*ContainerAsset
-	FileAssets      []*FileAsset
-	AssetsLocation  *kops.Assets
-	// TODO we'd like to use cloudup.Phase here, but that introduces a go cyclic dependency
-	Phase string
+	ImageAssets    []*ImageAsset
+	FileAssets     []*FileAsset
+	AssetsLocation *kops.Assets
+	GetAssets      bool
 
 	// KubernetesVersion is the version of kubernetes we are installing
 	KubernetesVersion semver.Version
@@ -63,12 +62,12 @@ type StaticManifest struct {
 	Roles []kops.InstanceGroupRole
 }
 
-// ContainerAsset models a container's location.
-type ContainerAsset struct {
-	// DockerImage will be the name of the container we should run.
-	// This is used to copy a container to a ContainerRegistry.
-	DockerImage string
-	// CanonicalLocation will be the source location of the container.
+// ImageAsset models an image's location.
+type ImageAsset struct {
+	// DownloadLocation will be the name of the image we should run.
+	// This is used to copy an image to a ContainerRegistry.
+	DownloadLocation string
+	// CanonicalLocation will be the source location of the image.
 	CanonicalLocation string
 }
 
@@ -83,10 +82,10 @@ type FileAsset struct {
 }
 
 // NewAssetBuilder creates a new AssetBuilder.
-func NewAssetBuilder(cluster *kops.Cluster, phase string) *AssetBuilder {
+func NewAssetBuilder(cluster *kops.Cluster, getAssets bool) *AssetBuilder {
 	a := &AssetBuilder{
 		AssetsLocation: cluster.Spec.Assets,
-		Phase:          phase,
+		GetAssets:      getAssets,
 	}
 
 	version, err := util.ParseKubernetesVersion(cluster.Spec.KubernetesVersion)
@@ -120,9 +119,10 @@ func (a *AssetBuilder) RemapManifest(data []byte) ([]byte, error) {
 
 // RemapImage normalizes a containers location if a user sets the AssetsLocation ContainerRegistry location.
 func (a *AssetBuilder) RemapImage(image string) (string, error) {
-	asset := &ContainerAsset{}
-
-	asset.DockerImage = image
+	asset := &ImageAsset{
+		DownloadLocation:  image,
+		CanonicalLocation: image,
+	}
 
 	if strings.HasPrefix(image, "k8s.gcr.io/kops/dns-controller:") {
 		// To use user-defined DNS Controller:
@@ -166,11 +166,10 @@ func (a *AssetBuilder) RemapImage(image string) (string, error) {
 			normalized = re.ReplaceAllString(normalized, containerProxy)
 		}
 
-		asset.DockerImage = normalized
-		asset.CanonicalLocation = image
+		asset.DownloadLocation = normalized
 
 		// Run the new image
-		image = asset.DockerImage
+		image = asset.DownloadLocation
 	}
 
 	if a.AssetsLocation != nil && a.AssetsLocation.ContainerRegistry != nil {
@@ -189,16 +188,14 @@ func (a *AssetBuilder) RemapImage(image string) (string, error) {
 			// We can't nest arbitrarily
 			// Some risk of collisions, but also -- and __ in the names appear to be blocked by docker hub
 			normalized = strings.Replace(normalized, "/", "-", -1)
-			asset.DockerImage = registryMirror + "/" + normalized
+			asset.DownloadLocation = registryMirror + "/" + normalized
 		}
 
-		asset.CanonicalLocation = image
-
 		// Run the new image
-		image = asset.DockerImage
+		image = asset.DownloadLocation
 	}
 
-	a.ContainerAssets = append(a.ContainerAssets, asset)
+	a.ImageAssets = append(a.ImageAssets, asset)
 	return image, nil
 }
 
@@ -210,11 +207,11 @@ func (a *AssetBuilder) RemapFileAndSHA(fileURL *url.URL) (*url.URL, *hashing.Has
 	}
 
 	fileAsset := &FileAsset{
-		DownloadURL: fileURL,
+		DownloadURL:  fileURL,
+		CanonicalURL: fileURL,
 	}
 
 	if a.AssetsLocation != nil && a.AssetsLocation.FileRepository != nil {
-		fileAsset.CanonicalURL = fileURL
 
 		normalizedFileURL, err := a.remapURL(fileURL)
 		if err != nil {
@@ -245,13 +242,12 @@ func (a *AssetBuilder) RemapFileAndSHAValue(fileURL *url.URL, shaValue string) (
 	}
 
 	fileAsset := &FileAsset{
-		DownloadURL: fileURL,
-		SHAValue:    shaValue,
+		DownloadURL:  fileURL,
+		CanonicalURL: fileURL,
+		SHAValue:     shaValue,
 	}
 
 	if a.AssetsLocation != nil && a.AssetsLocation.FileRepository != nil {
-		fileAsset.CanonicalURL = fileURL
-
 		normalizedFile, err := a.remapURL(fileURL)
 		if err != nil {
 			return nil, err
@@ -283,7 +279,7 @@ func (a *AssetBuilder) findHash(file *FileAsset) (*hashing.Hash, error) {
 	// rest of the time. If not we get a chicken and the egg problem where we are reading the sha file
 	// before it exists.
 	u := file.DownloadURL
-	if a.Phase == "assets" && file.CanonicalURL != nil {
+	if a.GetAssets {
 		u = file.CanonicalURL
 	}
 
@@ -330,7 +326,7 @@ func (a *AssetBuilder) findHash(file *FileAsset) (*hashing.Hash, error) {
 	}
 
 	if a.AssetsLocation != nil && a.AssetsLocation.FileRepository != nil {
-		return nil, fmt.Errorf("you may have not staged your files correctly, please execute kops update cluster using the assets phase")
+		return nil, fmt.Errorf("you might have not staged your files correctly, please execute 'kops get assets --copy'")
 	}
 	return nil, fmt.Errorf("cannot determine hash for %q (have you specified a valid file location?)", u)
 }

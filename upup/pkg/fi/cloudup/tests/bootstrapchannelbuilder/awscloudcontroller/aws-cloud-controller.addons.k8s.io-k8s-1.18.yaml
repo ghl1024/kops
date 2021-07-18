@@ -4,7 +4,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: aws-cloud-controller.addons.k8s.io
-    addon.kops.k8s.io/version: 1.18.0-kops.1
     app.kubernetes.io/managed-by: kops
     k8s-addon: aws-cloud-controller.addons.k8s.io
     k8s-app: aws-cloud-controller-manager
@@ -23,8 +22,16 @@ spec:
       - args:
         - --v=2
         - --cloud-provider=aws
+        - --cluster-name=minimal.example.com
+        - --cluster-cidr=100.64.0.0/10
+        - --allocate-node-cidrs=true
+        - --configure-cloud-routes=false
         - --use-service-account-credentials=true
+        env:
+        - name: KUBERNETES_SERVICE_HOST
+          value: 127.0.0.1
         image: gcr.io/k8s-staging-provider-aws/cloud-controller-manager:latest
+        imagePullPolicy: IfNotPresent
         name: aws-cloud-controller-manager
         resources:
           requests:
@@ -32,7 +39,8 @@ spec:
       hostNetwork: true
       nodeSelector:
         node-role.kubernetes.io/master: ""
-      serviceAccountName: cloud-controller-manager
+      priorityClassName: system-cluster-critical
+      serviceAccountName: aws-cloud-controller-manager
       tolerations:
       - effect: NoSchedule
         key: node.cloudprovider.kubernetes.io/uninitialized
@@ -50,10 +58,9 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: aws-cloud-controller.addons.k8s.io
-    addon.kops.k8s.io/version: 1.18.0-kops.1
     app.kubernetes.io/managed-by: kops
     k8s-addon: aws-cloud-controller.addons.k8s.io
-  name: cloud-controller-manager
+  name: aws-cloud-controller-manager
   namespace: kube-system
 
 ---
@@ -64,7 +71,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: aws-cloud-controller.addons.k8s.io
-    addon.kops.k8s.io/version: 1.18.0-kops.1
     app.kubernetes.io/managed-by: kops
     k8s-addon: aws-cloud-controller.addons.k8s.io
   name: cloud-controller-manager:apiserver-authentication-reader
@@ -76,7 +82,7 @@ roleRef:
 subjects:
 - apiGroup: ""
   kind: ServiceAccount
-  name: cloud-controller-manager
+  name: aws-cloud-controller-manager
   namespace: kube-system
 
 ---
@@ -87,7 +93,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: aws-cloud-controller.addons.k8s.io
-    addon.kops.k8s.io/version: 1.18.0-kops.1
     app.kubernetes.io/managed-by: kops
     k8s-addon: aws-cloud-controller.addons.k8s.io
   name: system:cloud-controller-manager
@@ -173,6 +178,16 @@ rules:
   verbs:
   - list
   - watch
+- apiGroups:
+  - ""
+  resourceNames:
+  - node-controller
+  - service-controller
+  - route-controller
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
 
 ---
 
@@ -182,7 +197,6 @@ metadata:
   creationTimestamp: null
   labels:
     addon.kops.k8s.io/name: aws-cloud-controller.addons.k8s.io
-    addon.kops.k8s.io/version: 1.18.0-kops.1
     app.kubernetes.io/managed-by: kops
     k8s-addon: aws-cloud-controller.addons.k8s.io
   name: system:cloud-controller-manager
@@ -193,5 +207,5 @@ roleRef:
 subjects:
 - apiGroup: ""
   kind: ServiceAccount
-  name: cloud-controller-manager
+  name: aws-cloud-controller-manager
   namespace: kube-system

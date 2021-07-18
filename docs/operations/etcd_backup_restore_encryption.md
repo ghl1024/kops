@@ -68,7 +68,7 @@ on the master that is the leader of the cluster (you can find this out by checki
 Note that the leader might be different for the `main` and `events` clusters.
 
 After the restore, you will probably face an intermittent connection to apiserver.
-If you look at your kubernetes endpoint, you should have more address than masters. The restore bring back the address of the old masters and you should clean this up.
+If you look at your kubernetes endpoint, you should have more addresses than masters. The restore brings back the addresses of the old masters and you should clean this up.
 
 To verify this, check the endpoints resource of the kubernetes apiserver, like this:
 ```
@@ -91,8 +91,14 @@ NOTE: You will need to run it multiple times for each old IP, regarding the size
 After that, you can check again the endpoint and everything should be fixed.
 
 After the restore is complete, api server should come back up, and you should have a working cluster.
-Note that the api server might be very busy for a while as it changes the cluster back to the state of the backup.
-It's a good idea to temporarily increase the instance size of your masters and roll your worker nodes.
+Note that the api server might be very busy for a while as it changes the cluster back to the state of the backup. 
+You might consider temporarily increasing the instance size of your control plane.
+
+Because the state on each of the Nodes may differ from the state in etcd, it is also a good idea to do a rolling-update of the entire cluster:
+
+```sh
+kops rolling-update cluster --force --yes
+```
 
 For more information and troubleshooting, please check the [etcd-manager documentation](https://github.com/kopeio/etcd-manager).
 

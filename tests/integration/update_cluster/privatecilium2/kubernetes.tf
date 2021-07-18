@@ -116,11 +116,12 @@ resource "aws_autoscaling_group" "bastion-privatecilium-example-com" {
     id      = aws_launch_template.bastion-privatecilium-example-com.id
     version = aws_launch_template.bastion-privatecilium-example-com.latest_version
   }
-  load_balancers      = [aws_elb.bastion-privatecilium-example-com.id]
-  max_size            = 1
-  metrics_granularity = "1Minute"
-  min_size            = 1
-  name                = "bastion.privatecilium.example.com"
+  load_balancers        = [aws_elb.bastion-privatecilium-example-com.id]
+  max_size              = 1
+  metrics_granularity   = "1Minute"
+  min_size              = 1
+  name                  = "bastion.privatecilium.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -165,11 +166,12 @@ resource "aws_autoscaling_group" "master-us-test-1a-masters-privatecilium-exampl
     id      = aws_launch_template.master-us-test-1a-masters-privatecilium-example-com.id
     version = aws_launch_template.master-us-test-1a-masters-privatecilium-example-com.latest_version
   }
-  load_balancers      = [aws_elb.api-privatecilium-example-com.id]
-  max_size            = 1
-  metrics_granularity = "1Minute"
-  min_size            = 1
-  name                = "master-us-test-1a.masters.privatecilium.example.com"
+  load_balancers        = [aws_elb.api-privatecilium-example-com.id]
+  max_size              = 1
+  metrics_granularity   = "1Minute"
+  min_size              = 1
+  name                  = "master-us-test-1a.masters.privatecilium.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -229,10 +231,11 @@ resource "aws_autoscaling_group" "nodes-privatecilium-example-com" {
     id      = aws_launch_template.nodes-privatecilium-example-com.id
     version = aws_launch_template.nodes-privatecilium-example-com.latest_version
   }
-  max_size            = 2
-  metrics_granularity = "1Minute"
-  min_size            = 2
-  name                = "nodes.privatecilium.example.com"
+  max_size              = 2
+  metrics_granularity   = "1Minute"
+  min_size              = 2
+  name                  = "nodes.privatecilium.example.com"
+  protect_from_scale_in = false
   tag {
     key                 = "KubernetesCluster"
     propagate_at_launch = true
@@ -393,24 +396,6 @@ resource "aws_iam_instance_profile" "nodes-privatecilium-example-com" {
   }
 }
 
-resource "aws_iam_role_policy" "bastions-privatecilium-example-com" {
-  name   = "bastions.privatecilium.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_bastions.privatecilium.example.com_policy")
-  role   = aws_iam_role.bastions-privatecilium-example-com.name
-}
-
-resource "aws_iam_role_policy" "masters-privatecilium-example-com" {
-  name   = "masters.privatecilium.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_masters.privatecilium.example.com_policy")
-  role   = aws_iam_role.masters-privatecilium-example-com.name
-}
-
-resource "aws_iam_role_policy" "nodes-privatecilium-example-com" {
-  name   = "nodes.privatecilium.example.com"
-  policy = file("${path.module}/data/aws_iam_role_policy_nodes.privatecilium.example.com_policy")
-  role   = aws_iam_role.nodes-privatecilium-example-com.name
-}
-
 resource "aws_iam_role" "bastions-privatecilium-example-com" {
   assume_role_policy = file("${path.module}/data/aws_iam_role_bastions.privatecilium.example.com_policy")
   name               = "bastions.privatecilium.example.com"
@@ -439,6 +424,24 @@ resource "aws_iam_role" "nodes-privatecilium-example-com" {
     "Name"                                            = "nodes.privatecilium.example.com"
     "kubernetes.io/cluster/privatecilium.example.com" = "owned"
   }
+}
+
+resource "aws_iam_role_policy" "bastions-privatecilium-example-com" {
+  name   = "bastions.privatecilium.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_bastions.privatecilium.example.com_policy")
+  role   = aws_iam_role.bastions-privatecilium-example-com.name
+}
+
+resource "aws_iam_role_policy" "masters-privatecilium-example-com" {
+  name   = "masters.privatecilium.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_masters.privatecilium.example.com_policy")
+  role   = aws_iam_role.masters-privatecilium-example-com.name
+}
+
+resource "aws_iam_role_policy" "nodes-privatecilium-example-com" {
+  name   = "nodes.privatecilium.example.com"
+  policy = file("${path.module}/data/aws_iam_role_policy_nodes.privatecilium.example.com_policy")
+  role   = aws_iam_role.nodes-privatecilium-example-com.name
 }
 
 resource "aws_internet_gateway" "privatecilium-example-com" {
@@ -486,10 +489,14 @@ resource "aws_launch_template" "bastion-privatecilium-example-com" {
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "bastion.privatecilium.example.com"
   network_interfaces {
     associate_public_ip_address = true
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.bastion-privatecilium-example-com.id]
   }
   tag_specifications {
@@ -557,10 +564,14 @@ resource "aws_launch_template" "master-us-test-1a-masters-privatecilium-example-
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "master-us-test-1a.masters.privatecilium.example.com"
   network_interfaces {
     associate_public_ip_address = false
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.masters-privatecilium-example-com.id]
   }
   tag_specifications {
@@ -634,10 +645,14 @@ resource "aws_launch_template" "nodes-privatecilium-example-com" {
     http_put_response_hop_limit = 1
     http_tokens                 = "optional"
   }
+  monitoring {
+    enabled = false
+  }
   name = "nodes.privatecilium.example.com"
   network_interfaces {
     associate_public_ip_address = false
     delete_on_termination       = true
+    ipv6_address_count          = 0
     security_groups             = [aws_security_group.nodes-privatecilium-example-com.id]
   }
   tag_specifications {
@@ -686,6 +701,24 @@ resource "aws_nat_gateway" "us-test-1a-privatecilium-example-com" {
   }
 }
 
+resource "aws_route" "route-0-0-0-0--0" {
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.privatecilium-example-com.id
+  route_table_id         = aws_route_table.privatecilium-example-com.id
+}
+
+resource "aws_route" "route-__--0" {
+  destination_ipv6_cidr_block = "::/0"
+  gateway_id                  = aws_internet_gateway.privatecilium-example-com.id
+  route_table_id              = aws_route_table.privatecilium-example-com.id
+}
+
+resource "aws_route" "route-private-us-test-1a-0-0-0-0--0" {
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.us-test-1a-privatecilium-example-com.id
+  route_table_id         = aws_route_table.private-us-test-1a-privatecilium-example-com.id
+}
+
 resource "aws_route53_record" "api-privatecilium-example-com" {
   alias {
     evaluate_target_health = false
@@ -695,16 +728,6 @@ resource "aws_route53_record" "api-privatecilium-example-com" {
   name    = "api.privatecilium.example.com"
   type    = "A"
   zone_id = "/hostedzone/Z1AFAKE1ZON3YO"
-}
-
-resource "aws_route_table_association" "private-us-test-1a-privatecilium-example-com" {
-  route_table_id = aws_route_table.private-us-test-1a-privatecilium-example-com.id
-  subnet_id      = aws_subnet.us-test-1a-privatecilium-example-com.id
-}
-
-resource "aws_route_table_association" "utility-us-test-1a-privatecilium-example-com" {
-  route_table_id = aws_route_table.privatecilium-example-com.id
-  subnet_id      = aws_subnet.utility-us-test-1a-privatecilium-example-com.id
 }
 
 resource "aws_route_table" "private-us-test-1a-privatecilium-example-com" {
@@ -727,16 +750,202 @@ resource "aws_route_table" "privatecilium-example-com" {
   vpc_id = aws_vpc.privatecilium-example-com.id
 }
 
-resource "aws_route" "route-0-0-0-0--0" {
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.privatecilium-example-com.id
-  route_table_id         = aws_route_table.privatecilium-example-com.id
+resource "aws_route_table_association" "private-us-test-1a-privatecilium-example-com" {
+  route_table_id = aws_route_table.private-us-test-1a-privatecilium-example-com.id
+  subnet_id      = aws_subnet.us-test-1a-privatecilium-example-com.id
 }
 
-resource "aws_route" "route-private-us-test-1a-0-0-0-0--0" {
-  destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.us-test-1a-privatecilium-example-com.id
-  route_table_id         = aws_route_table.private-us-test-1a-privatecilium-example-com.id
+resource "aws_route_table_association" "utility-us-test-1a-privatecilium-example-com" {
+  route_table_id = aws_route_table.privatecilium-example-com.id
+  subnet_id      = aws_subnet.utility-us-test-1a-privatecilium-example-com.id
+}
+
+resource "aws_s3_bucket_object" "cluster-completed-spec" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_cluster-completed.spec_content")
+  key                    = "clusters.example.com/privatecilium.example.com/cluster-completed.spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-events_content")
+  key                    = "clusters.example.com/privatecilium.example.com/backups/etcd/events/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "etcd-cluster-spec-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_etcd-cluster-spec-main_content")
+  key                    = "clusters.example.com/privatecilium.example.com/backups/etcd/main/control/etcd-cluster-spec"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "kops-version-txt" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_kops-version.txt_content")
+  key                    = "clusters.example.com/privatecilium.example.com/kops-version.txt"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-events" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-events_content")
+  key                    = "clusters.example.com/privatecilium.example.com/manifests/etcd/events.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-etcdmanager-main" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-etcdmanager-main_content")
+  key                    = "clusters.example.com/privatecilium.example.com/manifests/etcd/main.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "manifests-static-kube-apiserver-healthcheck" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_manifests-static-kube-apiserver-healthcheck_content")
+  key                    = "clusters.example.com/privatecilium.example.com/manifests/static/kube-apiserver-healthcheck.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-master-us-test-1a" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-master-us-test-1a_content")
+  key                    = "clusters.example.com/privatecilium.example.com/igconfig/master/master-us-test-1a/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "nodeupconfig-nodes" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_nodeupconfig-nodes_content")
+  key                    = "clusters.example.com/privatecilium.example.com/igconfig/node/nodes/nodeupconfig.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-bootstrap" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-bootstrap_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/bootstrap-channel.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-core-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-core.addons.k8s.io_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/core.addons.k8s.io/v1.4.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-dns-controller-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-dns-controller.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/dns-controller.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-kops-controller-addons-k8s-io-k8s-1-16" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-kops-controller.addons.k8s.io-k8s-1.16_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/kops-controller.addons.k8s.io/k8s-1.16.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-kube-dns-addons-k8s-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-kube-dns.addons.k8s.io-k8s-1.12_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/kube-dns.addons.k8s.io/k8s-1.12.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-kubelet-api-rbac-addons-k8s-io-k8s-1-9" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-kubelet-api.rbac.addons.k8s.io-k8s-1.9_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/kubelet-api.rbac.addons.k8s.io/k8s-1.9.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-limit-range-addons-k8s-io" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-limit-range.addons.k8s.io_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/limit-range.addons.k8s.io/v1.5.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-networking-cilium-io-k8s-1-12" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-networking.cilium.io-k8s-1.12_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/networking.cilium.io/k8s-1.12-v1.8.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-rbac-addons-k8s-io-k8s-1-8" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-rbac.addons.k8s.io-k8s-1.8_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/rbac.addons.k8s.io/k8s-1.8.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_bucket_object" "privatecilium-example-com-addons-storage-aws-addons-k8s-io-v1-15-0" {
+  bucket                 = "testingBucket"
+  content                = file("${path.module}/data/aws_s3_bucket_object_privatecilium.example.com-addons-storage-aws.addons.k8s.io-v1.15.0_content")
+  key                    = "clusters.example.com/privatecilium.example.com/addons/storage-aws.addons.k8s.io/v1.15.0.yaml"
+  server_side_encryption = "AES256"
+}
+
+resource "aws_security_group" "api-elb-privatecilium-example-com" {
+  description = "Security group for api ELB"
+  name        = "api-elb.privatecilium.example.com"
+  tags = {
+    "KubernetesCluster"                               = "privatecilium.example.com"
+    "Name"                                            = "api-elb.privatecilium.example.com"
+    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privatecilium-example-com.id
+}
+
+resource "aws_security_group" "bastion-elb-privatecilium-example-com" {
+  description = "Security group for bastion ELB"
+  name        = "bastion-elb.privatecilium.example.com"
+  tags = {
+    "KubernetesCluster"                               = "privatecilium.example.com"
+    "Name"                                            = "bastion-elb.privatecilium.example.com"
+    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privatecilium-example-com.id
+}
+
+resource "aws_security_group" "bastion-privatecilium-example-com" {
+  description = "Security group for bastion"
+  name        = "bastion.privatecilium.example.com"
+  tags = {
+    "KubernetesCluster"                               = "privatecilium.example.com"
+    "Name"                                            = "bastion.privatecilium.example.com"
+    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privatecilium-example-com.id
+}
+
+resource "aws_security_group" "masters-privatecilium-example-com" {
+  description = "Security group for masters"
+  name        = "masters.privatecilium.example.com"
+  tags = {
+    "KubernetesCluster"                               = "privatecilium.example.com"
+    "Name"                                            = "masters.privatecilium.example.com"
+    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privatecilium-example-com.id
+}
+
+resource "aws_security_group" "nodes-privatecilium-example-com" {
+  description = "Security group for nodes"
+  name        = "nodes.privatecilium.example.com"
+  tags = {
+    "KubernetesCluster"                               = "privatecilium.example.com"
+    "Name"                                            = "nodes.privatecilium.example.com"
+    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
+  }
+  vpc_id = aws_vpc.privatecilium-example-com.id
 }
 
 resource "aws_security_group_rule" "from-0-0-0-0--0-ingress-tcp-22to22-bastion-elb-privatecilium-example-com" {
@@ -766,9 +975,27 @@ resource "aws_security_group_rule" "from-api-elb-privatecilium-example-com-egres
   type              = "egress"
 }
 
+resource "aws_security_group_rule" "from-api-elb-privatecilium-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "-1"
+  security_group_id = aws_security_group.api-elb-privatecilium-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
 resource "aws_security_group_rule" "from-bastion-elb-privatecilium-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.bastion-elb-privatecilium-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-bastion-elb-privatecilium-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.bastion-elb-privatecilium-example-com.id
   to_port           = 0
@@ -787,6 +1014,15 @@ resource "aws_security_group_rule" "from-bastion-elb-privatecilium-example-com-i
 resource "aws_security_group_rule" "from-bastion-privatecilium-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.bastion-privatecilium-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-bastion-privatecilium-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.bastion-privatecilium-example-com.id
   to_port           = 0
@@ -820,6 +1056,15 @@ resource "aws_security_group_rule" "from-masters-privatecilium-example-com-egres
   type              = "egress"
 }
 
+resource "aws_security_group_rule" "from-masters-privatecilium-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "-1"
+  security_group_id = aws_security_group.masters-privatecilium-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
 resource "aws_security_group_rule" "from-masters-privatecilium-example-com-ingress-all-0to0-masters-privatecilium-example-com" {
   from_port                = 0
   protocol                 = "-1"
@@ -841,6 +1086,15 @@ resource "aws_security_group_rule" "from-masters-privatecilium-example-com-ingre
 resource "aws_security_group_rule" "from-nodes-privatecilium-example-com-egress-all-0to0-0-0-0-0--0" {
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.nodes-privatecilium-example-com.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "from-nodes-privatecilium-example-com-egress-all-0to0-__--0" {
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
   protocol          = "-1"
   security_group_id = aws_security_group.nodes-privatecilium-example-com.id
   to_port           = 0
@@ -910,61 +1164,6 @@ resource "aws_security_group_rule" "icmp-pmtu-api-elb-0-0-0-0--0" {
   type              = "ingress"
 }
 
-resource "aws_security_group" "api-elb-privatecilium-example-com" {
-  description = "Security group for api ELB"
-  name        = "api-elb.privatecilium.example.com"
-  tags = {
-    "KubernetesCluster"                               = "privatecilium.example.com"
-    "Name"                                            = "api-elb.privatecilium.example.com"
-    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privatecilium-example-com.id
-}
-
-resource "aws_security_group" "bastion-elb-privatecilium-example-com" {
-  description = "Security group for bastion ELB"
-  name        = "bastion-elb.privatecilium.example.com"
-  tags = {
-    "KubernetesCluster"                               = "privatecilium.example.com"
-    "Name"                                            = "bastion-elb.privatecilium.example.com"
-    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privatecilium-example-com.id
-}
-
-resource "aws_security_group" "bastion-privatecilium-example-com" {
-  description = "Security group for bastion"
-  name        = "bastion.privatecilium.example.com"
-  tags = {
-    "KubernetesCluster"                               = "privatecilium.example.com"
-    "Name"                                            = "bastion.privatecilium.example.com"
-    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privatecilium-example-com.id
-}
-
-resource "aws_security_group" "masters-privatecilium-example-com" {
-  description = "Security group for masters"
-  name        = "masters.privatecilium.example.com"
-  tags = {
-    "KubernetesCluster"                               = "privatecilium.example.com"
-    "Name"                                            = "masters.privatecilium.example.com"
-    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privatecilium-example-com.id
-}
-
-resource "aws_security_group" "nodes-privatecilium-example-com" {
-  description = "Security group for nodes"
-  name        = "nodes.privatecilium.example.com"
-  tags = {
-    "KubernetesCluster"                               = "privatecilium.example.com"
-    "Name"                                            = "nodes.privatecilium.example.com"
-    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
-  }
-  vpc_id = aws_vpc.privatecilium-example-com.id
-}
-
 resource "aws_subnet" "us-test-1a-privatecilium-example-com" {
   availability_zone = "us-test-1a"
   cidr_block        = "172.20.32.0/19"
@@ -991,9 +1190,16 @@ resource "aws_subnet" "utility-us-test-1a-privatecilium-example-com" {
   vpc_id = aws_vpc.privatecilium-example-com.id
 }
 
-resource "aws_vpc_dhcp_options_association" "privatecilium-example-com" {
-  dhcp_options_id = aws_vpc_dhcp_options.privatecilium-example-com.id
-  vpc_id          = aws_vpc.privatecilium-example-com.id
+resource "aws_vpc" "privatecilium-example-com" {
+  assign_generated_ipv6_cidr_block = true
+  cidr_block                       = "172.20.0.0/16"
+  enable_dns_hostnames             = true
+  enable_dns_support               = true
+  tags = {
+    "KubernetesCluster"                               = "privatecilium.example.com"
+    "Name"                                            = "privatecilium.example.com"
+    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
+  }
 }
 
 resource "aws_vpc_dhcp_options" "privatecilium-example-com" {
@@ -1006,15 +1212,9 @@ resource "aws_vpc_dhcp_options" "privatecilium-example-com" {
   }
 }
 
-resource "aws_vpc" "privatecilium-example-com" {
-  cidr_block           = "172.20.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-  tags = {
-    "KubernetesCluster"                               = "privatecilium.example.com"
-    "Name"                                            = "privatecilium.example.com"
-    "kubernetes.io/cluster/privatecilium.example.com" = "owned"
-  }
+resource "aws_vpc_dhcp_options_association" "privatecilium-example-com" {
+  dhcp_options_id = aws_vpc_dhcp_options.privatecilium-example-com.id
+  vpc_id          = aws_vpc.privatecilium-example-com.id
 }
 
 terraform {

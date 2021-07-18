@@ -54,7 +54,6 @@ For a better viewing experience please check out our live documentation site at 
 * [Cluster addons](operations/addons.md)
 * [Cluster configuration management](changing_configuration.md)
 * [Cluster desired configuration creation from template](operations/cluster_template.md)
-* [Cluster upgrades and migrations](operations/cluster_upgrades_and_migrations.md)
 * [`etcd` volume encryption setup](operations/etcd_backup_restore_encryption.md#etcd-volume-encryption)
 * [`etcd` backup/restore](operations/etcd_backup_restore_encryption.md#backing-up-etcd)
 * [GPU setup](gpu.md)
@@ -63,7 +62,6 @@ For a better viewing experience please check out our live documentation site at 
     * how to use other image for cluster nodes, and information on available/tested images
 * [`k8s` upgrading](operations/updates_and_upgrades.md#upgrading-kubernetes)
 * [`kops` updating](operations/updates_and_upgrades.md#updating-kops)
-* [`kube-up` to `kops` upgrade](upgrade_from_kubeup.md)
 * [Label management](labels.md)
     * for cluster nodes
 * [Secret management](secrets.md)
@@ -107,15 +105,15 @@ For a better viewing experience please check out our live documentation site at 
 
 ## Development
 
-* [Developing using Docker](development/Docker.md)
-* [Documentation Guidelines](development/documentation.md)
-* [E2E testing with `kops` clusters](development/testing.md)
-* [Example on how to add a feature](development/adding_a_feature.md)
-* [Hack Directory](development/hack.md)
-* [How to update `kops` API](development/api_updates.md)
-* [Low level description on how kops works](development/how_it_works.md)
-* [Notes on Gossip design](development/gossip.md)
-* [Notes on master instance sizing](development/instancesizes.md)
-* [Our release process](development/release.md)
-* [Releasing with Homebrew](development/homebrew.md)
-* [Rolling Update Diagrams](development/rolling_update.md)
+* [Developing using Docker](contributing/Docker.md)
+* [Documentation Guidelines](contributing/documentation.md)
+* [E2E testing with `kops` clusters](contributing/testing.md)
+* [Example on how to add a feature](contributing/adding_a_feature.md)
+* [Hack Directory](contributing/hack.md)
+* [How to update `kops` API](contributing/api_updates.md)
+* [Low level description on how kops works](contributing/how_it_works.md)
+* [Notes on Gossip design](contributing/gossip.md)
+* [Notes on master instance sizing](contributing/instancesizes.md)
+* [Our release process](contributing/release.md)
+* [Releasing with Homebrew](contributing/homebrew.md)
+* [Rolling Update Diagrams](contributing/rolling_update.md)

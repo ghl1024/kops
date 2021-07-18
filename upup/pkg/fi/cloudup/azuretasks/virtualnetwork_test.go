@@ -131,7 +131,8 @@ func TestVirtualNetworkRun(t *testing.T) {
 		val = "val"
 	)
 	vnet := &VirtualNetwork{
-		Name: to.StringPtr("rg"),
+		Name:      to.StringPtr("rg"),
+		Lifecycle: fi.LifecycleSync,
 		ResourceGroup: &ResourceGroup{
 			Name: to.StringPtr("rg"),
 		},

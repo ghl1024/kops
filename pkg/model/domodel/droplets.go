@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"k8s.io/kops/pkg/model"
-	"k8s.io/kops/pkg/resources/digitalocean"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/do"
 	"k8s.io/kops/upup/pkg/fi/cloudup/dotasks"
@@ -32,7 +31,7 @@ type DropletBuilder struct {
 	*DOModelContext
 
 	BootstrapScriptBuilder *model.BootstrapScriptBuilder
-	Lifecycle              *fi.Lifecycle
+	Lifecycle              fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &DropletBuilder{}
@@ -56,18 +55,20 @@ func (d *DropletBuilder) Build(c *fi.ModelBuilderContext) error {
 	for _, ig := range d.InstanceGroups {
 		name := d.AutoscalingGroupName(ig)
 
-		var droplet dotasks.Droplet
-		droplet.Count = int(fi.Int32Value(ig.Spec.MinSize))
-		droplet.Name = fi.String(name)
+		droplet := dotasks.Droplet{
+			Count:     int(fi.Int32Value(ig.Spec.MinSize)),
+			Name:      fi.String(name),
+			Lifecycle: d.Lifecycle,
 
-		// during alpha support we only allow 1 region
-		// validation for only 1 region is done at this point
-		droplet.Region = fi.String(d.Cluster.Spec.Subnets[0].Region)
-		droplet.Size = fi.String(ig.Spec.MachineType)
-		droplet.Image = fi.String(ig.Spec.Image)
-		droplet.SSHKey = fi.String(sshKeyFingerPrint)
+			// during alpha support we only allow 1 region
+			// validation for only 1 region is done at this point
+			Region: fi.String(d.Cluster.Spec.Subnets[0].Region),
+			Size:   fi.String(ig.Spec.MachineType),
+			Image:  fi.String(ig.Spec.Image),
+			SSHKey: fi.String(sshKeyFingerPrint),
 
-		droplet.Tags = []string{clusterTag}
+			Tags: []string{clusterTag},
+		}
 
 		if ig.IsMaster() {
 			masterIndexCount++
@@ -76,9 +77,9 @@ func (d *DropletBuilder) Build(c *fi.ModelBuilderContext) error {
 			clusterTagIndex := do.TagKubernetesClusterIndex + ":" + "etcd-" + strconv.Itoa(masterIndexCount)
 			droplet.Tags = append(droplet.Tags, clusterTagIndex)
 			droplet.Tags = append(droplet.Tags, clusterMasterTag)
-			droplet.Tags = append(droplet.Tags, digitalocean.TagKubernetesInstanceGroup+":"+ig.Name)
+			droplet.Tags = append(droplet.Tags, do.TagKubernetesInstanceGroup+":"+ig.Name)
 		} else {
-			droplet.Tags = append(droplet.Tags, digitalocean.TagKubernetesInstanceGroup+":"+ig.Name)
+			droplet.Tags = append(droplet.Tags, do.TagKubernetesInstanceGroup+":"+ig.Name)
 		}
 
 		userData, err := d.BootstrapScriptBuilder.ResourceNodeUp(c, ig)

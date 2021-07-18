@@ -155,9 +155,42 @@ func TestValidateSubnets(t *testing.T) {
 			},
 			ExpectedErrors: []string{"Invalid value::subnets[0].cidr"},
 		},
+		{
+			Input: []kops.ClusterSubnetSpec{
+				{Name: "a", IPv6CIDR: "2001:db8::/56"},
+			},
+		},
+		{
+			Input: []kops.ClusterSubnetSpec{
+				{Name: "a", IPv6CIDR: "10.0.0.0/8"},
+			},
+			ExpectedErrors: []string{"Invalid value::subnets[0].ipv6CIDR"},
+		},
+		{
+			Input: []kops.ClusterSubnetSpec{
+				{Name: "a", IPv6CIDR: "::ffff:10.128.0.0"},
+			},
+			ExpectedErrors: []string{"Invalid value::subnets[0].ipv6CIDR"},
+		},
+		{
+			Input: []kops.ClusterSubnetSpec{
+				{Name: "a", IPv6CIDR: "::ffff:10.128.0.0/8"},
+			},
+			ExpectedErrors: []string{"Invalid value::subnets[0].ipv6CIDR"},
+		},
+		{
+			Input: []kops.ClusterSubnetSpec{
+				{Name: "a", CIDR: "::ffff:10.128.0.0/8"},
+			},
+			ExpectedErrors: []string{"Invalid value::subnets[0].cidr"},
+		},
 	}
 	for _, g := range grid {
-		errs := validateSubnets(g.Input, field.NewPath("subnets"))
+		cluster := &kops.ClusterSpec{
+			CloudProvider: "aws",
+			Subnets:       g.Input,
+		}
+		errs := validateSubnets(cluster, field.NewPath("subnets"))
 
 		testErrors(t, g.Input, errs, g.ExpectedErrors)
 	}
@@ -256,12 +289,18 @@ func TestValidateKubeAPIServer(t *testing.T) {
 				"Unsupported value::KubeAPIServer.authorizationMode",
 			},
 		},
+		{
+			Input: kops.KubeAPIServerConfig{
+				LogFormat: "no-json",
+			},
+			ExpectedErrors: []string{"Unsupported value::KubeAPIServer.logFormat"},
+		},
 	}
 	for _, g := range grid {
 		if g.Cluster == nil {
 			g.Cluster = &kops.Cluster{
 				Spec: kops.ClusterSpec{
-					KubernetesVersion: "1.16.0",
+					KubernetesVersion: "1.20.0",
 				},
 			}
 		}
@@ -757,8 +796,7 @@ func Test_Validate_Cilium(t *testing.T) {
 		},
 		{
 			Cilium: kops.CiliumNetworkingSpec{
-				DisableMasquerade: true,
-				Ipam:              "eni",
+				Ipam: "eni",
 			},
 			Spec: kops.ClusterSpec{
 				CloudProvider: "aws",
@@ -766,7 +804,7 @@ func Test_Validate_Cilium(t *testing.T) {
 		},
 		{
 			Cilium: kops.CiliumNetworkingSpec{
-				DisableMasquerade: true,
+				DisableMasquerade: fi.Bool(true),
 				Ipam:              "eni",
 			},
 			Spec: kops.ClusterSpec{
@@ -781,7 +819,8 @@ func Test_Validate_Cilium(t *testing.T) {
 		},
 		{
 			Cilium: kops.CiliumNetworkingSpec{
-				Ipam: "eni",
+				DisableMasquerade: fi.Bool(false),
+				Ipam:              "eni",
 			},
 			Spec: kops.ClusterSpec{
 				CloudProvider: "aws",
@@ -790,13 +829,28 @@ func Test_Validate_Cilium(t *testing.T) {
 		},
 		{
 			Cilium: kops.CiliumNetworkingSpec{
-				DisableMasquerade: true,
-				Ipam:              "eni",
+				EnableL7Proxy:          fi.Bool(true),
+				IPTablesRulesNoinstall: true,
+			},
+			Spec: kops.ClusterSpec{
+				CloudProvider: "aws",
+			},
+			ExpectedErrors: []string{"Forbidden::cilium.enableL7Proxy"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				Ipam: "eni",
 			},
 			Spec: kops.ClusterSpec{
 				CloudProvider: "gce",
 			},
 			ExpectedErrors: []string{"Forbidden::cilium.ipam"},
+		},
+		{
+			Cilium: kops.CiliumNetworkingSpec{
+				IdentityAllocationMode: "kvstore",
+			},
+			ExpectedErrors: []string{"Forbidden::cilium.identityAllocationMode"},
 		},
 		{
 			Cilium: kops.CiliumNetworkingSpec{
@@ -809,27 +863,13 @@ func Test_Validate_Cilium(t *testing.T) {
 		},
 		{
 			Cilium: kops.CiliumNetworkingSpec{
-				Version: "v1.7.0",
-			},
-			Spec: kops.ClusterSpec{
-				KubernetesVersion: "1.18.0",
-			},
-			ExpectedErrors: []string{"Forbidden::cilium.version"},
-		},
-		{
-			Cilium: kops.CiliumNetworkingSpec{
-				Version: "v1.7.0",
-			},
-		},
-		{
-			Cilium: kops.CiliumNetworkingSpec{
 				Version: "1.7.0",
 			},
 			ExpectedErrors: []string{"Invalid value::cilium.version"},
 		},
 		{
 			Cilium: kops.CiliumNetworkingSpec{
-				Version: "v1.7.0",
+				Version: "v1.8.0",
 				Hubble: &kops.HubbleSpec{
 					Enabled: fi.Bool(true),
 				},
@@ -843,6 +883,11 @@ func Test_Validate_Cilium(t *testing.T) {
 					Enabled: fi.Bool(true),
 				},
 			},
+			Spec: kops.ClusterSpec{
+				CertManager: &kops.CertManagerConfig{
+					Enabled: fi.Bool(true),
+				},
+			},
 		},
 	}
 	for _, g := range grid {
@@ -850,7 +895,7 @@ func Test_Validate_Cilium(t *testing.T) {
 			Cilium: &g.Cilium,
 		}
 		if g.Spec.KubernetesVersion == "" {
-			g.Spec.KubernetesVersion = "1.15.0"
+			g.Spec.KubernetesVersion = "1.17.0"
 		}
 		cluster := &kops.Cluster{
 			Spec: g.Spec,
@@ -1176,4 +1221,93 @@ func Test_Validate_CloudConfiguration(t *testing.T) {
 			testErrors(t, g.Input, errs, g.ExpectedErrors)
 		})
 	}
+}
+
+func TestValidateSAExternalPermissions(t *testing.T) {
+	grid := []struct {
+		Description    string
+		Input          []kops.ServiceAccountExternalPermission
+		ExpectedErrors []string
+	}{
+
+		{
+			Description: "Duplicate SA",
+			Input: []kops.ServiceAccountExternalPermission{
+				{
+					Name:      "MySA",
+					Namespace: "MyNS",
+					AWS: &kops.AWSPermission{
+						PolicyARNs: []string{"-"},
+					},
+				},
+				{
+					Name:      "MySA",
+					Namespace: "MyNS",
+					AWS: &kops.AWSPermission{
+						PolicyARNs: []string{"-"},
+					},
+				},
+			},
+			ExpectedErrors: []string{"Duplicate value::iam.serviceAccountExternalPermissions[MyNS/MySA]"},
+		},
+		{
+			Description: "Missing permissions",
+			Input: []kops.ServiceAccountExternalPermission{
+				{
+					Name:      "MySA",
+					Namespace: "MyNS",
+				},
+			},
+			ExpectedErrors: []string{"Required value::iam.serviceAccountExternalPermissions[MyNS/MySA].aws"},
+		},
+		{
+			Description: "Setting both arn and inline",
+			Input: []kops.ServiceAccountExternalPermission{
+				{
+					Name:      "MySA",
+					Namespace: "MyNS",
+					AWS: &kops.AWSPermission{
+						PolicyARNs:   []string{"-"},
+						InlinePolicy: "-",
+					},
+				},
+			},
+			ExpectedErrors: []string{"Forbidden::iam.serviceAccountExternalPermissions[MyNS/MySA].aws"},
+		},
+		{
+			Description: "Empty SA name",
+			Input: []kops.ServiceAccountExternalPermission{
+				{
+					Namespace: "MyNS",
+					AWS: &kops.AWSPermission{
+						PolicyARNs:   []string{"-"},
+						InlinePolicy: "-",
+					},
+				},
+			},
+			ExpectedErrors: []string{"Required value::iam.serviceAccountExternalPermissions[MyNS/].name"},
+		},
+		{
+			Description: "Empty SA namespace",
+			Input: []kops.ServiceAccountExternalPermission{
+				{
+					Name: "MySA",
+					AWS: &kops.AWSPermission{
+						PolicyARNs:   []string{"-"},
+						InlinePolicy: "-",
+					},
+				},
+			},
+			ExpectedErrors: []string{"Required value::iam.serviceAccountExternalPermissions[/MySA].namespace"},
+		},
+	}
+
+	for _, g := range grid {
+		fldPath := field.NewPath("iam.serviceAccountExternalPermissions")
+		t.Run(g.Description, func(t *testing.T) {
+			errs := validateSAExternalPermissions(g.Input, fldPath)
+			testErrors(t, g.Input, errs, g.ExpectedErrors)
+		})
+	}
+
 }
